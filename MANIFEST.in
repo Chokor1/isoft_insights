@@ -1,0 +1,18 @@
+include MANIFEST.in
+include requirements.txt
+include *.json
+include *.md
+include *.py
+include *.txt
+recursive-include isoft_insights *.css
+recursive-include isoft_insights *.csv
+recursive-include isoft_insights *.html
+recursive-include isoft_insights *.ico
+recursive-include isoft_insights *.js
+recursive-include isoft_insights *.json
+recursive-include isoft_insights *.md
+recursive-include isoft_insights *.png
+recursive-include isoft_insights *.py
+recursive-include isoft_insights *.svg
+recursive-include isoft_insights *.txt
+recursive-exclude isoft_insights *.pyc
