@@ -1,0 +1,124 @@
+{
+ "actions": [],
+ "creation": "2026-05-29 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "general_section",
+  "default_company",
+  "default_currency",
+  "default_period",
+  "column_break_general",
+  "top_n",
+  "theme_color",
+  "access_section",
+  "access_mode",
+  "allowed_roles",
+  "column_break_access",
+  "allowed_users"
+ ],
+ "fields": [
+  {
+   "fieldname": "general_section",
+   "fieldtype": "Section Break",
+   "label": "General"
+  },
+  {
+   "fieldname": "default_company",
+   "fieldtype": "Link",
+   "label": "Default Company",
+   "options": "Company"
+  },
+  {
+   "fieldname": "default_currency",
+   "fieldtype": "Link",
+   "label": "Display Currency",
+   "options": "Currency",
+   "description": "Leave blank to use the company's default currency."
+  },
+  {
+   "default": "This Year",
+   "fieldname": "default_period",
+   "fieldtype": "Select",
+   "label": "Default Period",
+   "options": "This Month\nThis Quarter\nThis Year\nLast 12 Months\nAll Time"
+  },
+  {
+   "fieldname": "column_break_general",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "10",
+   "fieldname": "top_n",
+   "fieldtype": "Int",
+   "label": "Top N (customers / items)",
+   "description": "How many rows to show in 'top' lists."
+  },
+  {
+   "default": "Blue",
+   "fieldname": "theme_color",
+   "fieldtype": "Select",
+   "label": "Theme Color",
+   "options": "Blue\nGreen\nPurple\nOrange\nSlate\nDark"
+  },
+  {
+   "fieldname": "access_section",
+   "fieldtype": "Section Break",
+   "label": "Access Control"
+  },
+  {
+   "default": "By Role",
+   "fieldname": "access_mode",
+   "fieldtype": "Select",
+   "label": "Access Mode",
+   "options": "By Role\nBy User"
+  },
+  {
+   "default": "Sales Manager",
+   "depends_on": "eval:doc.access_mode=='By Role'",
+   "description": "One role per line. Users with any of these roles can open Isoft Insights. System Manager always has access.",
+   "fieldname": "allowed_roles",
+   "fieldtype": "Small Text",
+   "label": "Allowed Roles"
+  },
+  {
+   "fieldname": "column_break_access",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.access_mode=='By User'",
+   "description": "One user (email) per line.",
+   "fieldname": "allowed_users",
+   "fieldtype": "Small Text",
+   "label": "Allowed Users"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-05-29 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Isoft Insights",
+ "name": "Isoft Insights Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Sales Manager"
+  }
+ ],
+ "quick_entry": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

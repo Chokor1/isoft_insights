@@ -4,3 +4,5 @@
 *.swp
 tags
 isoft_insights/docs/current
+__pycache__/
+node_modules/

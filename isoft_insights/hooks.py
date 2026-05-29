@@ -16,6 +16,9 @@ app_license = "MIT"
 # app_include_css = "/assets/isoft_insights/css/isoft_insights.css"
 # app_include_js = "/assets/isoft_insights/js/isoft_insights.js"
 
+# Navbar shortcut icon to the Isoft Insights sales analytics dashboard
+app_include_js = "/assets/isoft_insights/js/isoft_insights_icon.js"
+
 # include js, css files in header of web template
 # web_include_css = "/assets/isoft_insights/css/isoft_insights.css"
 # web_include_js = "/assets/isoft_insights/js/isoft_insights.js"
