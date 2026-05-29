@@ -392,7 +392,7 @@ isoft_insights.App = class App {
 		/* Modern sticky top navbar */
 		.ii-bar {
 			display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-			position: sticky; top: 0; z-index: 30;
+			position: sticky; top: 0; z-index: 30; margin-top: 10px;
 			background: rgba(255, 255, 255, 0.88); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
 			border: 1px solid var(--ii-border); border-radius: 14px;
 			padding: 9px 14px; margin-bottom: 18px;
