@@ -75,9 +75,9 @@
    "options": "By Role\nBy User"
   },
   {
-   "default": "Sales Manager",
+   "default": "Isoft Insights User",
    "depends_on": "eval:doc.access_mode=='By Role'",
-   "description": "One role per line. Users with any of these roles can open Isoft Insights. System Manager always has access.",
+   "description": "One role per line. Users with any of these roles can open Isoft Insights. Only Administrator has access by default.",
    "fieldname": "allowed_roles",
    "fieldtype": "Small Text",
    "label": "Allowed Roles"

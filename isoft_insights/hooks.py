@@ -19,6 +19,16 @@ app_license = "MIT"
 # Navbar shortcut icon to the Isoft Insights sales analytics dashboard
 app_include_js = "/assets/isoft_insights/js/isoft_insights_icon.js"
 
+# Fixtures
+# --------
+# Ship the dedicated access role so it exists on fresh installs.
+fixtures = [
+	{
+		"doctype": "Role",
+		"filters": [["role_name", "=", "Isoft Insights User"]],
+	},
+]
+
 # include js, css files in header of web template
 # web_include_css = "/assets/isoft_insights/css/isoft_insights.css"
 # web_include_js = "/assets/isoft_insights/js/isoft_insights.js"

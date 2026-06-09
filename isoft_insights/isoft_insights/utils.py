@@ -52,12 +52,12 @@ def get_insights_settings():
 def _has_access():
 	"""True if the current user may use Isoft Insights (mirrors the settings)."""
 	user = frappe.session.user
+	# Administrator is always allowed as a safety hatch; every other user
+	# (including System Manager) must be granted access explicitly.
 	if user == "Administrator":
 		return True
 
 	roles = set(frappe.get_roles(user))
-	if "System Manager" in roles:
-		return True
 
 	s = frappe.get_single(SETTINGS_DOCTYPE)
 	mode = (s.access_mode or "By Role").strip().lower()
@@ -67,7 +67,7 @@ def _has_access():
 		return user in allowed
 
 	allowed_roles = [r.strip() for r in (s.allowed_roles or "").splitlines() if r.strip()] or [
-		"Sales Manager"
+		"Isoft Insights User"
 	]
 	return bool(roles.intersection(allowed_roles))
 
