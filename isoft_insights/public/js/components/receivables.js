@@ -8,8 +8,9 @@ isoft_insights.util = isoft_insights.util || {
 
 isoft_insights.views.receivables = function (ctx) {
 	const st = ctx.state.receivables = ctx.state.receivables || {
-		as_on: frappe.datetime.get_today(), only_overdue: 0, search: ''
+		as_on: frappe.datetime.get_today(), only_overdue: 0, search: '', colf: {}
 	};
+	st.colf = st.colf || {};
 	const esc = isoft_insights.util.esc;
 
 	ctx.$content.html(`
@@ -41,16 +42,63 @@ isoft_insights.views.receivables = function (ctx) {
 
 	const ageCell = (val, cls) => val ? `<span class="ii-aging-badge ${cls}">${ctx.money(val)}</span>` : '<span class="ii-zero">·</span>';
 
-	const renderTable = () => {
+	// Per-column value getters (numeric columns are filterable with operators).
+	const overdueOf = (r) => flt(r.total_outstanding) - flt(r.current_amt);
+	const NUMCOLS = [
+		{ id: 'invoice_count', get: (r) => flt(r.invoice_count) },
+		{ id: 'current_amt', get: (r) => flt(r.current_amt) },
+		{ id: 'b1_30', get: (r) => flt(r.b1_30) },
+		{ id: 'b31_60', get: (r) => flt(r.b31_60) },
+		{ id: 'b61_90', get: (r) => flt(r.b61_90) },
+		{ id: 'b90_plus', get: (r) => flt(r.b90_plus) },
+		{ id: 'total_outstanding', get: (r) => flt(r.total_outstanding) },
+		{ id: 'overdue', get: overdueOf },
+		{ id: 'balance', get: (r) => flt(r.balance) },
+	];
+
+	// Parse a numeric filter like ">1000", "<= 50", "=0", "100-200" into a predicate.
+	const numPred = (raw) => {
+		const s = (raw || '').trim();
+		if (!s) return null;
+		const num = (x) => flt(String(x).replace(/[, ]/g, ''));
+		let m = s.match(/^(>=|<=|>|<|=)?\s*(-?[\d.,]+)$/);
+		if (m) {
+			const op = m[1] || '=', n = num(m[2]);
+			return (v) => op === '>' ? v > n : op === '<' ? v < n
+				: op === '>=' ? v >= n : op === '<=' ? v <= n : Math.abs(v - n) < 0.005;
+		}
+		m = s.match(/^(-?[\d.,]+)\s*-\s*(-?[\d.,]+)$/);
+		if (m) { const a = num(m[1]), b = num(m[2]); return (v) => v >= a && v <= b; }
+		return null;
+	};
+
+	const filteredRows = () => {
 		const term = (st.search || '').toLowerCase().trim();
-		const rows = lastRows.filter((r) => !term ||
-			(r.customer_name || '').toLowerCase().includes(term) ||
-			(r.customer || '').toLowerCase().includes(term));
+		const cf = (st.colf.customer || '').toLowerCase().trim();
+		const preds = NUMCOLS
+			.map((c) => ({ get: c.get, p: numPred(st.colf[c.id]) }))
+			.filter((c) => c.p);
+		const matchCust = (r) => {
+			const name = (r.customer_name || '').toLowerCase(), code = (r.customer || '').toLowerCase();
+			return (!term || name.includes(term) || code.includes(term)) &&
+				(!cf || name.includes(cf) || code.includes(cf));
+		};
+		return lastRows.filter((r) => matchCust(r) && preds.every((c) => c.p(c.get(r))));
+	};
 
-		const $body = ctx.$content.find('#ii-rec-body');
-		if (!rows.length) { $body.html(isoft_insights.util.empty('No outstanding balances.')); return; }
+	const fInput = (id, ph) => `<input type="text" class="ii-colf form-control" data-col="${id}" value="${esc(st.colf[id] || '')}" placeholder="${ph}">`;
 
-		const body = rows.map((r) => `
+	// Repaint only tbody + tfoot so the header filter inputs keep focus while typing.
+	const paint = () => {
+		const rows = filteredRows();
+		const $tb = ctx.$content.find('#ii-rec-tbody');
+		const $tf = ctx.$content.find('#ii-rec-tfoot');
+		if (!rows.length) {
+			$tb.html(`<tr><td colspan="10">${isoft_insights.util.empty('No rows match the filters.')}</td></tr>`);
+			$tf.empty();
+			return;
+		}
+		$tb.html(rows.map((r) => `
 			<tr class="ii-cust-row" data-customer="${esc(r.customer)}">
 				<td><i class="fa fa-chevron-right ii-caret"></i><b>${esc(r.customer_name)}</b></td>
 				<td class="ii-num">${ctx.number(r.invoice_count)}</td>
@@ -60,10 +108,12 @@ isoft_insights.views.receivables = function (ctx) {
 				<td class="ii-num">${ageCell(r.b61_90, 'ii-age-90')}</td>
 				<td class="ii-num">${ageCell(r.b90_plus, 'ii-age-90p')}</td>
 				<td class="ii-num"><b>${ctx.money(r.total_outstanding)}</b></td>
-			</tr>`).join('');
+				<td class="ii-num">${ctx.money(overdueOf(r))}</td>
+				<td class="ii-num"><b>${ctx.money(r.balance)}</b></td>
+			</tr>`).join(''));
 
 		const sum = (f) => rows.reduce((a, r) => a + flt(r[f]), 0);
-		const foot = `
+		$tf.html(`
 			<tr class="ii-totrow">
 				<td>Total (${rows.length})</td>
 				<td class="ii-num">${ctx.number(sum('invoice_count'))}</td>
@@ -73,22 +123,44 @@ isoft_insights.views.receivables = function (ctx) {
 				<td class="ii-num">${ctx.money(sum('b61_90'))}</td>
 				<td class="ii-num">${ctx.money(sum('b90_plus'))}</td>
 				<td class="ii-num">${ctx.money(sum('total_outstanding'))}</td>
-			</tr>`;
+				<td class="ii-num">${ctx.money(sum('total_outstanding') - sum('current_amt'))}</td>
+				<td class="ii-num">${ctx.money(sum('balance'))}</td>
+			</tr>`);
+	};
 
-		$body.html(`
+	// Build the static table shell (title + header + filter row); rows via paint().
+	const renderTable = () => {
+		ctx.$content.find('#ii-rec-body').html(`
 			<div class="ii-card-title" style="margin:8px 0 10px;"><i class="fa fa-credit-card"></i> Outstanding by customer
-				<span class="ii-pill">click a row to see invoices · aged as on ${esc(st.as_on)}</span>
+				<span class="ii-pill">click a row to see invoices · filter row supports &gt; &lt; &gt;= &lt;= and 100-200 · aged as on ${esc(st.as_on)}</span>
 			</div>
 			<table class="ii-table">
-				<thead><tr>
-					<th>Customer</th><th class="ii-num">Inv.</th>
-					<th class="ii-num">Current</th><th class="ii-num">1–30</th><th class="ii-num">31–60</th>
-					<th class="ii-num">61–90</th><th class="ii-num">90+</th><th class="ii-num">Total</th>
-				</tr></thead>
-				<tbody>${body}</tbody>
-				<tfoot>${foot}</tfoot>
+				<thead>
+					<tr>
+						<th>Customer</th><th class="ii-num">Inv.</th>
+						<th class="ii-num">Current</th><th class="ii-num">1–30</th><th class="ii-num">31–60</th>
+						<th class="ii-num">61–90</th><th class="ii-num">90+</th><th class="ii-num">Total Outstanding</th>
+						<th class="ii-num">Total Overdue</th>
+						<th class="ii-num">Balance</th>
+					</tr>
+					<tr class="ii-filterrow">
+						<td>${fInput('customer', 'Customer…')}</td>
+						<td>${fInput('invoice_count', '> 0')}</td>
+						<td>${fInput('current_amt', '> <')}</td>
+						<td>${fInput('b1_30', '> <')}</td>
+						<td>${fInput('b31_60', '> <')}</td>
+						<td>${fInput('b61_90', '> <')}</td>
+						<td>${fInput('b90_plus', '> <')}</td>
+						<td>${fInput('total_outstanding', '> <')}</td>
+						<td>${fInput('overdue', '> <')}</td>
+						<td>${fInput('balance', '> <')}</td>
+					</tr>
+				</thead>
+				<tbody id="ii-rec-tbody"></tbody>
+				<tfoot id="ii-rec-tfoot"></tfoot>
 			</table>
 		`);
+		paint();
 	};
 
 	// Drill-down: expand a customer row to show their open invoices
@@ -100,8 +172,8 @@ isoft_insights.views.receivables = function (ctx) {
 				? `<span class="ii-overdue">${cint(iv.days_overdue)} days</span>`
 				: '<span class="ii-notdue">Not due</span>';
 			const link = `/app/sales-invoice/${encodeURIComponent(iv.invoice)}`;
-			return `<tr>
-				<td><a href="${link}" target="_blank" rel="noopener" onclick="window.open('${link}','_blank');return false;">${esc(iv.invoice)}</a></td>
+			return `<tr class="ii-inv-row" data-href="${link}" style="cursor:pointer;">
+				<td><a href="${link}" target="_blank" rel="noopener">${esc(iv.invoice)}</a></td>
 				<td>${esc(iv.posting_date || '')}</td>
 				<td>${esc(iv.due_date || '—')}</td>
 				<td>${overdue}</td>
@@ -114,6 +186,14 @@ isoft_insights.views.receivables = function (ctx) {
 			<tbody>${lines}</tbody></table>`;
 	};
 
+	// Click anywhere on an invoice row to open that Sales Invoice in a new tab.
+	// (Skip when the inner <a> handles the click itself.)
+	ctx.$content.on('click', '.ii-inv-row', function (e) {
+		if ($(e.target).closest('a').length) return;
+		const href = $(this).data('href');
+		if (href) window.open(href, '_blank', 'noopener');
+	});
+
 	// Delegate clicks (tbody is re-rendered on search, container is stable)
 	ctx.$content.on('click', '.ii-cust-row', function () {
 		const $row = $(this);
@@ -123,7 +203,7 @@ isoft_insights.views.receivables = function (ctx) {
 		ctx.$content.find('.ii-cust-row').removeClass('open');
 		$row.addClass('open');
 		const customer = $row.data('customer');
-		const $detail = $(`<tr class="ii-detail-row"><td colspan="8"><div class="ii-loading" style="padding:18px"><i class="fa fa-spinner fa-spin"></i> Loading invoices…</div></td></tr>`);
+		const $detail = $(`<tr class="ii-detail-row"><td colspan="10"><div class="ii-loading" style="padding:18px"><i class="fa fa-spinner fa-spin"></i> Loading invoices…</div></td></tr>`);
 		$row.after($detail);
 		ctx.api('get_customer_open_invoices', { customer: customer, as_on_date: st.as_on || null, company: ctx.app.filters().company })
 			.then((data) => $detail.find('td').html(detailHtml(data)))
@@ -143,7 +223,13 @@ isoft_insights.views.receivables = function (ctx) {
 
 	ctx.$content.find('#r-ason').on('change', function () { st.as_on = $(this).val(); load(); });
 	ctx.$content.find('#r-overdue').on('change', function () { st.only_overdue = $(this).prop('checked') ? 1 : 0; load(); });
-	ctx.$content.find('#r-search').on('input', function () { st.search = $(this).val(); renderTable(); });
+	ctx.$content.find('#r-search').on('input', function () { st.search = $(this).val(); paint(); });
+
+	// Per-column filter inputs in the table header (text for customer, operators for amounts).
+	ctx.$content.off('input', '.ii-colf').on('input', '.ii-colf', function () {
+		st.colf[$(this).data('col')] = $(this).val();
+		paint();
+	});
 
 	load();
 };

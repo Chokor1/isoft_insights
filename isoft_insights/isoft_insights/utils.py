@@ -360,7 +360,7 @@ def get_customer_balance(as_on_date=None, company=None, only_overdue=0):
 		"""
 		SELECT
 			customer,
-			customer_name,
+			MAX(customer_name) AS customer_name,
 			COALESCE(SUM(out_base), 0) AS total_outstanding,
 			COALESCE(SUM(CASE WHEN days <= 0 THEN out_base ELSE 0 END), 0) AS current_amt,
 			COALESCE(SUM(CASE WHEN days BETWEEN 1 AND 30 THEN out_base ELSE 0 END), 0) AS b1_30,
@@ -377,15 +377,47 @@ def get_customer_balance(as_on_date=None, company=None, only_overdue=0):
 			FROM `tabSales Invoice` si
 			WHERE {where}
 		) t
-		GROUP BY customer, customer_name
+		GROUP BY customer
 		ORDER BY total_outstanding DESC
 		""".format(where=where),
 		params,
 		as_dict=True,
 	)
 
+	# Real customer balance from the GL (includes unlinked payments, journal
+	# entries, credit notes, advances) - can differ from the sum of outstanding
+	# invoices when receipts are not allocated against specific invoices.
+	customers = [r.customer for r in rows if r.customer]
+	balances = {}
+	if customers:
+		gl_conds = [
+			"gle.party_type = 'Customer'",
+			"gle.is_cancelled = 0",
+			"gle.posting_date <= %(as_on)s",
+			"gle.party IN %(customers)s",
+		]
+		gl_params = {"as_on": as_on, "customers": tuple(customers)}
+		if company:
+			gl_conds.append("gle.company = %(company)s")
+			gl_params["company"] = company
+		gl_rows = frappe.db.sql(
+			"""
+			SELECT gle.party AS customer, COALESCE(SUM(gle.debit - gle.credit), 0) AS balance
+			FROM `tabGL Entry` gle
+			WHERE {gl_where}
+			GROUP BY gle.party
+			""".format(gl_where=" AND ".join(gl_conds)),
+			gl_params,
+			as_dict=True,
+		)
+		balances = {b.customer: flt(b.balance) for b in gl_rows}
+
+	for r in rows:
+		r["balance"] = balances.get(r.customer, 0.0)
+
 	totals = {
 		"total_outstanding": sum(flt(r.total_outstanding) for r in rows),
+		"balance": sum(flt(r.balance) for r in rows),
 		"current_amt": sum(flt(r.current_amt) for r in rows),
 		"b1_30": sum(flt(r.b1_30) for r in rows),
 		"b31_60": sum(flt(r.b31_60) for r in rows),

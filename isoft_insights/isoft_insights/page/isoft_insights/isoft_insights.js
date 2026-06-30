@@ -453,6 +453,10 @@ isoft_insights.App = class App {
 		.ii-age-90 { background:#fee2e2; color:#991b1b; }
 		.ii-age-90p { background:#fecaca; color:#7f1d1d; }
 		.ii-totrow td { font-weight: 700; background: var(--ii-bg); }
+		.ii-filterrow td { padding: 4px 6px !important; border-bottom: 1px solid var(--ii-border); background: var(--ii-bg); }
+		.ii-colf { width: 100% !important; min-width: 56px; height: 28px !important; font-size: 12px !important; padding: 2px 8px !important;
+			border: 1px solid var(--ii-border) !important; border-radius: 7px !important; background: var(--ii-card); color: var(--ii-text); }
+		.ii-colf::placeholder { color: var(--ii-muted); opacity: .7; }
 
 		.ii-cust-row { cursor: pointer; }
 		.ii-cust-row .ii-caret { transition: transform .2s; color: var(--ii-muted); margin-right: 7px; font-size: 11px; }
@@ -522,6 +526,19 @@ isoft_insights.App = class App {
 			.ii-header { flex-direction: column; align-items: flex-start; }
 			.ii-kpi-value { font-size: 22px; }
 		}
+
+		/* --- Dark mode: follow Frappe's [data-theme="dark"] on <html> --- */
+		[data-theme="dark"] .ii-root {
+			--ii-bg: #1a1d23; --ii-card: #21242c; --ii-border: #32373f;
+			--ii-text: #e6e8ec; --ii-muted: #9aa1ac;
+		}
+		[data-theme="dark"] .ii-zero { color: #4b5563; }
+		[data-theme="dark"] .ii-cust-row.open > td,
+		[data-theme="dark"] .ii-matrix tbody tr:hover td.ii-sticky-col { background: rgba(59,130,246,0.16); }
+		[data-theme="dark"] .ii-kpi:hover { box-shadow: 0 12px 26px rgba(0,0,0,0.45); }
+		[data-theme="dark"] .ii-card { box-shadow: 0 4px 14px rgba(0,0,0,0.30); }
+		[data-theme="dark"] .ii-bar { background: rgba(33,36,44,0.88); box-shadow: 0 6px 22px rgba(0,0,0,0.45); }
+		[data-theme="dark"] .ii-tab { background: var(--ii-card); }
 		</style>`;
 		$('head').append(css);
 	}
