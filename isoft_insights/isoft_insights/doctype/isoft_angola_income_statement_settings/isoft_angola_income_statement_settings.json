@@ -1,0 +1,282 @@
+{
+ "actions": [],
+ "creation": "2026-07-07 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "general_section",
+  "enabled",
+  "statement_title",
+  "column_break_general",
+  "default_company",
+  "default_fiscal_year",
+  "prov_section",
+  "prov_help",
+  "acc_vendas",
+  "acc_servicos",
+  "acc_outros_prov_op",
+  "custos_section",
+  "custos_help",
+  "acc_variacoes",
+  "acc_trabalhos",
+  "acc_cmvmc",
+  "column_break_custos",
+  "acc_custos_pessoal",
+  "acc_amortizacoes",
+  "acc_outros_custos_op",
+  "fin_section",
+  "fin_help",
+  "acc_fin_proveitos",
+  "acc_fin_custos",
+  "acc_res_filiais",
+  "column_break_fin",
+  "acc_naoop_proveitos",
+  "acc_naoop_custos",
+  "imp_section",
+  "imp_help",
+  "acc_impostos_rendimento",
+  "acc_imposto_rend_extra",
+  "column_break_imp",
+  "acc_extra_proveitos",
+  "acc_extra_custos"
+ ],
+ "fields": [
+  {
+   "fieldname": "general_section",
+   "fieldtype": "Section Break",
+   "label": "General"
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "default": "Cálculo de Lucros e Perdas (Profits and Loss)",
+   "fieldname": "statement_title",
+   "fieldtype": "Data",
+   "label": "Statement Title"
+  },
+  {
+   "fieldname": "column_break_general",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Accounts below are filtered by this company.",
+   "fieldname": "default_company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "default_fiscal_year",
+   "fieldtype": "Link",
+   "label": "Default Fiscal Year",
+   "options": "Fiscal Year"
+  },
+  {
+   "fieldname": "prov_section",
+   "fieldtype": "Section Break",
+   "label": "Proveitos Operacionais"
+  },
+  {
+   "fieldname": "prov_help",
+   "fieldtype": "HTML",
+   "options": "<p style='color:#6b7280;font-size:12px;margin:0 0 6px'>Map each line to its account (a group account sums its whole sub-tree). Use <b>Auto-fill Standard Accounts</b> (top right) to map the standard PGC-A numbers (61, 62, 66, 76, 68, 78, 69, 79, 3411…) automatically. Totals and results are computed automatically.</p>"
+  },
+  {
+   "fieldname": "acc_vendas",
+   "fieldtype": "Link",
+   "label": "Vendas",
+   "options": "Account"
+  },
+  {
+   "fieldname": "acc_servicos",
+   "fieldtype": "Link",
+   "label": "Prestações de serviços",
+   "options": "Account"
+  },
+  {
+   "fieldname": "acc_outros_prov_op",
+   "fieldtype": "Link",
+   "label": "Outros proveitos operacionais",
+   "options": "Account"
+  },
+  {
+   "fieldname": "custos_section",
+   "fieldtype": "Section Break",
+   "label": "Custos Operacionais"
+  },
+  {
+   "fieldname": "custos_help",
+   "fieldtype": "HTML",
+   "options": "<p style='color:#6b7280;font-size:12px;margin:0 0 6px'>These lines make up Total de Custos Operacionais.</p>"
+  },
+  {
+   "fieldname": "acc_variacoes",
+   "fieldtype": "Link",
+   "label": "Variações nos produtos acabados e em vias de fabrico",
+   "options": "Account"
+  },
+  {
+   "fieldname": "acc_trabalhos",
+   "fieldtype": "Link",
+   "label": "Trabalhos para a própria empresa",
+   "options": "Account"
+  },
+  {
+   "fieldname": "acc_cmvmc",
+   "fieldtype": "Link",
+   "label": "Custo das mercadorias vendidas e matérias consumidas",
+   "options": "Account"
+  },
+  {
+   "fieldname": "column_break_custos",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "acc_custos_pessoal",
+   "fieldtype": "Link",
+   "label": "Custos com o Pessoal",
+   "options": "Account"
+  },
+  {
+   "fieldname": "acc_amortizacoes",
+   "fieldtype": "Link",
+   "label": "Amortizações",
+   "options": "Account"
+  },
+  {
+   "fieldname": "acc_outros_custos_op",
+   "fieldtype": "Link",
+   "label": "Outros custos e perdas operacionais",
+   "options": "Account"
+  },
+  {
+   "fieldname": "fin_section",
+   "fieldtype": "Section Break",
+   "label": "Resultados Financeiros e Não Operacionais"
+  },
+  {
+   "fieldname": "fin_help",
+   "fieldtype": "HTML",
+   "options": "<p style='color:#6b7280;font-size:12px;margin:0 0 6px'>Net lines: value = Proveitos − Custos (leave a field blank if not used).</p>"
+  },
+  {
+   "description": "Proveitos financeiros (e.g. 66)",
+   "fieldname": "acc_fin_proveitos",
+   "fieldtype": "Link",
+   "label": "Resultados financeiros — Proveitos",
+   "options": "Account"
+  },
+  {
+   "description": "Custos financeiros (e.g. 76)",
+   "fieldname": "acc_fin_custos",
+   "fieldtype": "Link",
+   "label": "Resultados financeiros — Custos",
+   "options": "Account"
+  },
+  {
+   "fieldname": "acc_res_filiais",
+   "fieldtype": "Link",
+   "label": "Resultados de filiais e associadas",
+   "options": "Account"
+  },
+  {
+   "fieldname": "column_break_fin",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Proveitos não operacionais (e.g. 68)",
+   "fieldname": "acc_naoop_proveitos",
+   "fieldtype": "Link",
+   "label": "Resultados não operacionais — Proveitos",
+   "options": "Account"
+  },
+  {
+   "description": "Custos não operacionais (e.g. 78)",
+   "fieldname": "acc_naoop_custos",
+   "fieldtype": "Link",
+   "label": "Resultados não operacionais — Custos",
+   "options": "Account"
+  },
+  {
+   "fieldname": "imp_section",
+   "fieldtype": "Section Break",
+   "label": "Impostos e Resultados Extraordinários"
+  },
+  {
+   "fieldname": "imp_help",
+   "fieldtype": "HTML",
+   "options": "<p style='color:#6b7280;font-size:12px;margin:0 0 6px'>Taxes reduce the result; extraordinary results are a net (Proveitos − Custos).</p>"
+  },
+  {
+   "description": "e.g. 3411 — subtracted from current results",
+   "fieldname": "acc_impostos_rendimento",
+   "fieldtype": "Link",
+   "label": "Impostos sobre o rendimento",
+   "options": "Account"
+  },
+  {
+   "description": "Extraordinary income tax — subtracted",
+   "fieldname": "acc_imposto_rend_extra",
+   "fieldtype": "Link",
+   "label": "Imposto sobre o rendimento (extraordinário)",
+   "options": "Account"
+  },
+  {
+   "fieldname": "column_break_imp",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Proveitos extraordinários (e.g. 69)",
+   "fieldname": "acc_extra_proveitos",
+   "fieldtype": "Link",
+   "label": "Resultados extraordinários — Proveitos",
+   "options": "Account"
+  },
+  {
+   "description": "Custos extraordinários (e.g. 79)",
+   "fieldname": "acc_extra_custos",
+   "fieldtype": "Link",
+   "label": "Resultados extraordinários — Custos",
+   "options": "Account"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-07-07 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Isoft Insights",
+ "name": "Isoft Angola Income Statement Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "quick_entry": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

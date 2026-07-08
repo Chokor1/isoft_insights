@@ -25,7 +25,17 @@ isoft_insights.VIEWS = [
 	{ key: 'matrix',      label: 'Matrix',      icon: 'fa-th',          file: 'matrix',      period: false },
 	{ key: 'salesteam',   label: 'Sales Team',  icon: 'fa-user-circle', file: 'salesteam',   period: true },
 	{ key: 'receivables', label: 'Receivables', icon: 'fa-credit-card', file: 'receivables', period: false },
+	{ key: 'balancesheet', label: 'Lucros e Perdas', icon: 'fa-file-text-o', file: 'balancesheet', period: false },
+	{ key: 'balanco',     label: 'Balanço',     icon: 'fa-balance-scale', file: 'balanco',    period: false },
 	{ key: 'settings',    label: 'Settings',    icon: 'fa-cog',         file: 'settings',    period: false }
+];
+
+// Navbar groups: each group is a dropdown of views. Single-view groups act as a
+// plain button. `key` must be unique; `views` reference isoft_insights.VIEWS keys.
+isoft_insights.GROUPS = [
+	{ key: 'sales',      label: 'Sales',      icon: 'fa-line-chart', views: ['overview', 'customers', 'items', 'matrix', 'salesteam'] },
+	{ key: 'accounting', label: 'Accounting', icon: 'fa-book',       views: ['balancesheet', 'balanco', 'receivables'] },
+	{ key: 'settings',   label: 'Settings',   icon: 'fa-cog',        views: ['settings'] }
 ];
 
 // Hide the Frappe desk chrome (top navbar + page head) while on this page, like Invenza,
@@ -141,7 +151,8 @@ isoft_insights.App = class App {
 			this.state.period = s.default_period || 'This Year';
 			this.state.company = s.default_company || null;
 			this.state.currency = s.default_currency || 'USD';
-			this.apply_theme(s.theme_color || 'Blue');
+			// Accent is fixed; light/dark follows the Frappe desk theme via CSS.
+			this.apply_theme('Blue');
 
 			if (!s.can_access) {
 				this.show_lock();
@@ -169,10 +180,23 @@ isoft_insights.App = class App {
 
 	// ---- shell ----
 	build_shell() {
-		const tabs = isoft_insights.VIEWS.map((v) => `
-			<button class="ii-tab" data-view="${v.key}">
-				<i class="fa ${v.icon}"></i> ${v.label}
-			</button>`).join('');
+		const viewById = (k) => isoft_insights.VIEWS.find((v) => v.key === k);
+		const tabs = isoft_insights.GROUPS.map((g) => {
+			const views = (g.views || []).map(viewById).filter(Boolean);
+			const single = views.length === 1;
+			const menu = views.map((v) => `
+				<button class="ii-menu-item" data-view="${v.key}">
+					<i class="fa ${v.icon}"></i> ${v.label}
+				</button>`).join('');
+			return `
+				<div class="ii-group" data-group="${g.key}">
+					<button class="ii-tab ii-group-btn" ${single ? `data-view="${views[0].key}"` : ''}>
+						<i class="fa ${g.icon}"></i> ${g.label}
+						${single ? '' : '<i class="fa fa-angle-down ii-caret-down"></i>'}
+					</button>
+					${single ? '' : `<div class="ii-group-menu">${menu}</div>`}
+				</div>`;
+		}).join('');
 
 		this.page.main.html(`
 			<div class="ii-root">
@@ -247,9 +271,39 @@ isoft_insights.App = class App {
 			() => me.on_browser_fs_change()
 		);
 
-		this.page.main.find('.ii-tab').on('click', function () {
+		// Group button: single-view → open directly; multi-view → toggle its menu.
+		this.page.main.find('.ii-group-btn').on('click', function (e) {
+			e.stopPropagation();
+			const $group = $(this).closest('.ii-group');
+			const direct = $(this).data('view');
+			if (direct) {
+				me.close_menus();
+				me.set_view(direct);
+				return;
+			}
+			const wasOpen = $group.hasClass('open');
+			me.close_menus();
+			$group.toggleClass('open', !wasOpen);
+		});
+
+		// Menu item → open that view.
+		this.page.main.find('.ii-menu-item').on('click', function (e) {
+			e.stopPropagation();
+			me.close_menus();
 			me.set_view($(this).data('view'));
 		});
+
+		// Click anywhere else closes any open dropdown.
+		if (!isoft_insights._menu_bound) {
+			isoft_insights._menu_bound = true;
+			$(document).on('click.iimenu', () => {
+				if (isoft_insights.app) isoft_insights.app.close_menus();
+			});
+		}
+	}
+
+	close_menus() {
+		this.page.main.find('.ii-group').removeClass('open');
 	}
 
 	set_maximized(active) {
@@ -333,8 +387,15 @@ isoft_insights.App = class App {
 		if (!view) return;
 		this.state.active_view = key;
 
-		this.page.main.find('.ii-tab').removeClass('active');
-		this.page.main.find(`.ii-tab[data-view="${key}"]`).addClass('active');
+		// Highlight the group that owns this view + the active menu item.
+		this.page.main.find('.ii-group-btn').removeClass('active');
+		this.page.main.find('.ii-menu-item').removeClass('active');
+		const group = isoft_insights.GROUPS.find((g) => (g.views || []).indexOf(key) !== -1);
+		if (group) {
+			const $g = this.page.main.find(`.ii-group[data-group="${group.key}"]`);
+			$g.find('.ii-group-btn').addClass('active');
+			$g.find(`.ii-menu-item[data-view="${key}"]`).addClass('active');
+		}
 
 		// Settings has no global filters; views with their own time controls
 		// (matrix, receivables) hide the global period selector but keep company.
@@ -393,7 +454,7 @@ isoft_insights.App = class App {
 		.ii-bar {
 			display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
 			position: sticky; top: 0; z-index: 30; margin-top: 10px;
-			background: rgba(255, 255, 255, 0.88); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+			background: var(--ii-card); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
 			border: 1px solid var(--ii-border); border-radius: 14px;
 			padding: 9px 14px; margin-bottom: 18px;
 			box-shadow: 0 6px 22px rgba(17, 24, 39, 0.07);
@@ -427,6 +488,46 @@ isoft_insights.App = class App {
 		.ii-tab i { margin-right: 6px; }
 		.ii-tab:hover { color: var(--ii-primary); border-color: var(--ii-accent); transform: translateY(-1px); }
 		.ii-tab.active { background: var(--ii-primary); color: #fff; border-color: var(--ii-primary); box-shadow: 0 6px 16px rgba(37,99,235,0.3); }
+
+		/* Grouped navbar dropdowns */
+		.ii-group { position: relative; }
+		.ii-caret-down { margin-left: 6px !important; margin-right: 0 !important; font-size: 11px; opacity: .8; transition: transform .2s ease; }
+		.ii-group.open .ii-caret-down { transform: rotate(180deg); }
+		.ii-group.open .ii-group-btn { border-color: var(--ii-accent); color: var(--ii-primary); }
+		.ii-group.open .ii-group-btn.active { color: #fff; }
+		.ii-group-menu {
+			position: absolute; top: calc(100% + 6px); left: 0; z-index: 50; min-width: 210px;
+			background: var(--ii-card); border: 1px solid var(--ii-border); border-radius: 12px;
+			box-shadow: 0 14px 34px rgba(17,24,39,0.16); padding: 6px; display: none;
+			animation: ii-menu-in .14s ease;
+		}
+		.ii-group.open .ii-group-menu { display: block; }
+		@keyframes ii-menu-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+		.ii-menu-item {
+			display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+			border: none; background: transparent; color: var(--ii-text); cursor: pointer;
+			border-radius: 8px; padding: 9px 11px; font-weight: 600; font-size: 13px; transition: background .12s ease;
+		}
+		.ii-menu-item i { width: 16px; text-align: center; color: var(--ii-muted); }
+		.ii-menu-item:hover { background: var(--ii-bg); }
+		.ii-menu-item.active { background: var(--ii-primary); color: #fff; }
+		.ii-menu-item.active i { color: #fff; }
+		[data-theme="dark"] .ii-group-menu { box-shadow: 0 14px 34px rgba(0,0,0,0.5); }
+
+		/* Replace the browser's dark default focus outline on navbar controls with a soft themed one */
+		.ii-bar .ii-input:focus, .ii-bar .ii-input:focus-visible {
+			outline: none !important;
+			border-color: var(--ii-accent) !important;
+			box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
+		}
+		.ii-tab:focus, .ii-group-btn:focus, .ii-refresh:focus, .ii-menu-item:focus,
+		.ii-tab:focus-visible, .ii-group-btn:focus-visible, .ii-refresh:focus-visible, .ii-menu-item:focus-visible {
+			outline: none !important;
+		}
+		.ii-tab:focus:not(.active), .ii-group-btn:focus:not(.active), .ii-refresh:focus {
+			box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
+			border-color: var(--ii-accent) !important;
+		}
 
 		.ii-rowfilters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 		.ii-rowfilters label { font-size: 12px; color: var(--ii-muted); font-weight: 600; margin: 0 2px 0 6px; }
@@ -537,9 +638,236 @@ isoft_insights.App = class App {
 		[data-theme="dark"] .ii-matrix tbody tr:hover td.ii-sticky-col { background: rgba(59,130,246,0.16); }
 		[data-theme="dark"] .ii-kpi:hover { box-shadow: 0 12px 26px rgba(0,0,0,0.45); }
 		[data-theme="dark"] .ii-card { box-shadow: 0 4px 14px rgba(0,0,0,0.30); }
-		[data-theme="dark"] .ii-bar { background: rgba(33,36,44,0.88); box-shadow: 0 6px 22px rgba(0,0,0,0.45); }
+		[data-theme="dark"] .ii-bar { background: var(--ii-card); box-shadow: 0 6px 22px rgba(0,0,0,0.45); }
 		[data-theme="dark"] .ii-tab { background: var(--ii-card); }
 		</style>`;
 		$('head').append(css);
 	}
+};
+
+// --------------------------------------------------------------------------- //
+// Shared: custom settings modal for the two Angola reports
+// --------------------------------------------------------------------------- //
+isoft_insights.REPORT_SETTINGS = {
+	pl: {
+		title: 'Cálculo de Lucros e Perdas — Contas',
+		report: 'pl',
+		getter: 'get_angola_pl_settings',
+		saver: 'save_angola_pl_settings',
+		sections: [
+			{ label: 'Proveitos Operacionais', fields: [
+				['acc_vendas', 'Vendas'], ['acc_servicos', 'Prestações de serviços'], ['acc_outros_prov_op', 'Outros proveitos operacionais'] ] },
+			{ label: 'Custos Operacionais', fields: [
+				['acc_variacoes', 'Variações nos produtos acabados e em vias de fabrico'],
+				['acc_trabalhos', 'Trabalhos para a própria empresa'],
+				['acc_cmvmc', 'Custo das mercadorias vendidas e matérias consumidas'],
+				['acc_custos_pessoal', 'Custos com o Pessoal'],
+				['acc_amortizacoes', 'Amortizações'],
+				['acc_outros_custos_op', 'Outros custos e perdas operacionais'] ] },
+			{ label: 'Resultados Financeiros e Não Operacionais', fields: [
+				['acc_fin_proveitos', 'Resultados financeiros — Proveitos'],
+				['acc_fin_custos', 'Resultados financeiros — Custos'],
+				['acc_res_filiais', 'Resultados de filiais e associadas'],
+				['acc_naoop_proveitos', 'Não operacionais — Proveitos'],
+				['acc_naoop_custos', 'Não operacionais — Custos'] ] },
+			{ label: 'Impostos e Extraordinários', fields: [
+				['acc_impostos_rendimento', 'Impostos sobre o rendimento'],
+				['acc_imposto_rend_extra', 'Imposto sobre o rendimento (extraordinário)'],
+				['acc_extra_proveitos', 'Resultados extraordinários — Proveitos'],
+				['acc_extra_custos', 'Resultados extraordinários — Custos'] ] }
+		]
+	},
+	bs: {
+		title: 'Balanço — Contas',
+		report: 'bs',
+		getter: 'get_balance_sheet_settings',
+		saver: 'save_balance_sheet_settings',
+		sections: [
+			{ label: 'Activo Não Corrente', fields: [
+				['bs_imob_corp', 'Imobilizações corpóreas — Bruto'],
+				['bs_imob_corp_amort', 'Imobilizações corpóreas — Amortizações'],
+				['bs_imob_incorp', 'Imobilizações incorpóreas — Bruto'],
+				['bs_imob_incorp_amort', 'Imobilizações incorpóreas — Amortizações'],
+				['bs_investimentos', 'Investimentos em subsidiárias e associadas'],
+				['bs_outros_ativos_fin', 'Outros activos financeiros'],
+				['bs_outros_ativos_nao_corr', 'Outros activos não correntes'] ] },
+			{ label: 'Activo Corrente', fields: [
+				['bs_existencias', 'Existências'], ['bs_contas_receber', 'Contas a receber'],
+				['bs_disponibilidades', 'Disponibilidades'], ['bs_outros_ativos_corr', 'Outros activos correntes'] ] },
+			{ label: 'Capital Próprio', fields: [
+				['bs_capital', 'Capital'], ['bs_prest_supl', 'Prestações suplementares'],
+				['bs_reservas', 'Reservas'], ['bs_res_transitados', 'Resultados Transitados'] ] },
+			{ label: 'Passivo Não Corrente', fields: [
+				['bs_emprestimos_mlp', 'Empréstimos de médio e longo prazo'],
+				['bs_impostos_diferidos', 'Impostos diferidos'],
+				['bs_prov_clientes', 'Provisões para Clientes de Cobrança Duvidosa'],
+				['bs_prov_riscos', 'Provisões para outros riscos e encargos'],
+				['bs_outros_passivos_nao_corr', 'Outros passivos não correntes'] ] },
+			{ label: 'Passivo Corrente', fields: [
+				['bs_contas_pagar', 'Contas a pagar'], ['bs_emprestimos_cp', 'Empréstimos de curto prazo'],
+				['bs_parte_corr_mlp', 'Parte corrente de empréstimos a m/l prazo'],
+				['bs_outros_passivos_corr', 'Outros passivos correntes'] ] }
+		]
+	}
+};
+
+isoft_insights.openReportSettings = function (report, onSaved) {
+	const cfg = isoft_insights.REPORT_SETTINGS[report];
+	if (!cfg) return;
+	const method = (m) => 'isoft_insights.isoft_insights.utils.' + m;
+
+	frappe.call({ method: method(cfg.getter) }).then((r) => {
+		const data = r.message || {};
+		if (!data.can_manage) {
+			frappe.msgprint(__('Only an Accounts / System Manager can edit these settings.'));
+			return;
+		}
+
+		let dref = null;
+		const autofill = () => {
+			const company = dref && dref.get_value('default_company');
+			if (!company) { frappe.msgprint(__('Set the Company first.')); return; }
+			frappe.call({
+				method: method('resolve_standard_accounts'),
+				args: { report: cfg.report, company: company },
+				freeze: true, freeze_message: __('Matching standard accounts…')
+			}).then((res) => {
+				const out = res.message || {};
+				dref.set_values(out.accounts || {});
+				let msg = __('Filled {0} accounts.', [Object.keys(out.accounts || {}).length]);
+				if ((out.not_found || []).length) msg += ' ' + __('Not found: {0}', [out.not_found.join(', ')]);
+				frappe.show_alert({ message: msg, indicator: 'blue' });
+			});
+		};
+
+		const fields = [
+			{ fieldtype: 'Section Break', label: __('General') },
+			{ fieldname: 'default_company', fieldtype: 'Link', options: 'Company', label: __('Company'), reqd: 1 },
+			{ fieldname: 'default_fiscal_year', fieldtype: 'Link', options: 'Fiscal Year', label: __('Default Fiscal Year') },
+			{ fieldtype: 'Column Break' },
+			{ fieldname: 'autofill_btn', fieldtype: 'Button', label: __('Auto-fill Standard Accounts'), click: autofill }
+		];
+
+		const acctQuery = (d) => () => ({ filters: d.get_value('default_company') ? { company: d.get_value('default_company') } : {} });
+		cfg.sections.forEach((sec) => {
+			fields.push({ fieldtype: 'Section Break', label: __(sec.label) });
+			const half = Math.ceil(sec.fields.length / 2);
+			sec.fields.forEach(([fn, label], i) => {
+				if (i === half) fields.push({ fieldtype: 'Column Break' });
+				fields.push({
+					fieldname: fn, label: __(label), fieldtype: 'Link', options: 'Account',
+					get_query: () => acctQuery(dref)()
+				});
+			});
+		});
+
+		const d = new frappe.ui.Dialog({
+			title: __(cfg.title),
+			size: 'large',
+			fields: fields,
+			primary_action_label: __('Save'),
+			primary_action(values) {
+				frappe.call({
+					method: method(cfg.saver),
+					args: { payload: JSON.stringify(values) },
+					freeze: true, freeze_message: __('Saving…')
+				}).then(() => {
+					frappe.show_alert({ message: __('Settings saved'), indicator: 'green' });
+					d.hide();
+					if (onSaved) onSaved();
+				});
+			}
+		});
+		dref = d;
+		d.set_values(data);
+		d.show();
+	});
+};
+
+// --------------------------------------------------------------------------- //
+// Shared: clean print output for the two Angola reports
+// --------------------------------------------------------------------------- //
+isoft_insights.printStatement = function (kind, data) {
+	if (!data) { frappe.msgprint(__('Nothing to print yet.')); return; }
+	const esc = (s) => frappe.utils.escape_html(s == null ? '' : String(s));
+	const fmt = (v) => {
+		if (v == null || v === '') return '';
+		const n = flt(v);
+		const parts = Math.abs(n).toFixed(2).split('.');
+		parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+		return (n < 0 ? '-' : '') + parts[0] + ',' + parts[1];
+	};
+
+	let head, body;
+	if (kind === 'bs') {
+		head = `<tr>
+				<th class="l" rowspan="2">Descrição</th><th class="n" rowspan="2">Notas</th>
+				<th class="num" colspan="3">${esc(data.current_label)}</th>
+				<th class="num" rowspan="2">${esc(data.previous_label)}<br><span class="sub">Valor líquido</span></th>
+			</tr>
+			<tr><th class="num sub">Valor bruto</th><th class="num sub">Amortizações</th><th class="num sub">Valor líquido</th></tr>`;
+		body = (data.rows || []).map((r) => {
+			if (r.is_header) {
+				const c = r.kind === 'header' ? 'sec' : 'subsec';
+				return `<tr class="${c}"><td colspan="6">${esc(r.label)}</td></tr>`;
+			}
+			const c = r.strong ? 'grand' : (r.bold ? 'tot' : '');
+			return `<tr class="${c}"><td class="l">${esc(r.label)}</td><td class="n">${esc(r.notas)}</td>
+				<td class="num">${fmt(r.bruto)}</td><td class="num">${fmt(r.amort)}</td>
+				<td class="num">${fmt(r.liquido)}</td><td class="num">${fmt(r.liquido_prev)}</td></tr>`;
+		}).join('');
+	} else {
+		head = `<tr>
+				<th class="l">Descrição</th><th class="n">Notas</th>
+				<th class="num">${esc(data.current_label)}<br><span class="sub">Valor líquido</span></th>
+				<th class="num">${esc(data.previous_label)}<br><span class="sub">Valor líquido</span></th>
+			</tr>`;
+		body = (data.rows || []).map((r) => {
+			if (r.line_type === 'Header') return `<tr class="sec"><td colspan="4">${esc(r.label)}</td></tr>`;
+			const c = r.bold ? 'tot' : '';
+			return `<tr class="${c}"><td class="l">${esc(r.label)}</td><td class="n">${esc(r.notas)}</td>
+				<td class="num">${fmt(r.current)}</td><td class="num">${fmt(r.previous)}</td></tr>`;
+		}).join('');
+	}
+
+	const now = new Date();
+	const stamp = now.toLocaleDateString() + ' ' + now.toLocaleTimeString();
+	const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(data.title)}</title>
+		<style>
+			* { box-sizing: border-box; }
+			body { font-family: 'Inter', Arial, sans-serif; color: #1f2937; margin: 28px 34px; font-size: 12px; }
+			.doc-head { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #1f2937; padding-bottom: 10px; margin-bottom: 4px; }
+			.company { font-size: 18px; font-weight: 800; }
+			.title { font-size: 14px; font-weight: 700; margin-top: 2px; }
+			.meta { text-align: right; font-size: 11px; color: #6b7280; line-height: 1.5; }
+			table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+			th, td { padding: 5px 8px; }
+			thead th { border-bottom: 1.5px solid #1f2937; font-size: 11px; text-align: left; vertical-align: bottom; }
+			th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+			th.n, td.n { text-align: center; width: 44px; color: #6b7280; }
+			.sub { font-weight: 400; color: #6b7280; font-size: 10px; }
+			tbody td { border-bottom: 1px solid #e5e7eb; }
+			tr.sec td { font-weight: 800; text-transform: uppercase; letter-spacing: .5px; background: #f3f4f6; border-top: 1.5px solid #1f2937; }
+			tr.subsec td { font-weight: 700; background: #f9fafb; }
+			tr.tot td { font-weight: 700; background: #f9fafb; }
+			tr.grand td { font-weight: 800; border-top: 1.5px solid #1f2937; border-bottom: 1.5px solid #1f2937; }
+			.foot { margin-top: 16px; font-size: 10px; color: #9ca3af; text-align: right; }
+			@media print { body { margin: 12mm; } @page { size: A4 portrait; } }
+		</style></head>
+		<body>
+			<div class="doc-head">
+				<div><div class="company">${esc(data.company)}</div><div class="title">${esc(data.title)}</div></div>
+				<div class="meta">Moeda: <b>${esc(data.currency)}</b><br>Exercício: <b>${esc(data.fiscal_year)}</b><br>Emitido: ${esc(stamp)}</div>
+			</div>
+			<table><thead>${head}</thead><tbody>${body}</tbody></table>
+			<div class="foot">Isoft Insights · ${esc(data.title)}</div>
+		</body></html>`;
+
+	const w = window.open('', '_blank');
+	if (!w) { frappe.msgprint(__('Please allow pop-ups to print.')); return; }
+	w.document.open();
+	w.document.write(html);
+	w.document.close();
+	w.focus();
+	setTimeout(() => { try { w.print(); } catch (e) { /* user can print manually */ } }, 350);
 };

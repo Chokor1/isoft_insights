@@ -11,7 +11,6 @@
   "default_period",
   "column_break_general",
   "top_n",
-  "theme_color",
   "access_section",
   "access_mode",
   "allowed_roles",
@@ -54,13 +53,6 @@
    "fieldtype": "Int",
    "label": "Top N (customers / items)",
    "description": "How many rows to show in 'top' lists."
-  },
-  {
-   "default": "Blue",
-   "fieldname": "theme_color",
-   "fieldtype": "Select",
-   "label": "Theme Color",
-   "options": "Blue\nGreen\nPurple\nOrange\nSlate\nDark"
   },
   {
    "fieldname": "access_section",
