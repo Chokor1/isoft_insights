@@ -1,3 +1,5 @@
+(function () {
+'use strict';
 // Isoft Insights - Angola income statement (Demonstração de Resultados por Naturezas).
 // Data-driven two-column (current vs previous fiscal year) statement. The line
 // structure is configured in "Isoft Angola Income Statement Settings".
@@ -186,3 +188,4 @@ function injectStyles() {
 	</style>`;
 	$('head').append(css);
 }
+})();

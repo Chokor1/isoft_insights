@@ -1,3 +1,5 @@
+(function () {
+'use strict';
 // Isoft Insights - Angola Balanço (Balance Sheet).
 // Four value columns: current year (Valor bruto | Amortizações | Valor líquido)
 // and previous year (Valor líquido). Structure/formulas are fixed in the backend;
@@ -194,3 +196,4 @@ function injectStyles() {
 	</style>`;
 	$('head').append(css);
 }
+})();
