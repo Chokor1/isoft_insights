@@ -41,7 +41,7 @@ function renderEmpty(ctx, $c, cfg) {
 			<i class="fa fa-file-text-o" style="font-size:40px;color:var(--ii-muted);margin-bottom:14px;"></i>
 			<h3 style="font-weight:700;margin:0 0 6px;">No accounts mapped yet</h3>
 			<p style="color:var(--ii-muted);max-width:480px;margin:0 auto 18px;">
-				Map each line of the Cálculo de Lucros e Perdas to its account in the settings, then come back here.
+				Map each line of the Demonstração de Resultados to its account in the settings, then come back here.
 			</p>
 			${canManage
 				? `<button class="btn btn-primary" id="bs-config"><i class="fa fa-cog"></i> Configure accounts</button>`

@@ -25,7 +25,7 @@ isoft_insights.VIEWS = [
 	{ key: 'matrix',      label: 'Matrix',      icon: 'fa-th',          file: 'matrix',      period: false },
 	{ key: 'salesteam',   label: 'Sales Team',  icon: 'fa-user-circle', file: 'salesteam',   period: true },
 	{ key: 'receivables', label: 'Receivables', icon: 'fa-credit-card', file: 'receivables', period: false },
-	{ key: 'balancesheet', label: 'Lucros e Perdas', icon: 'fa-file-text-o', file: 'balancesheet', period: false },
+	{ key: 'balancesheet', label: 'Demonstração de Resultados', icon: 'fa-file-text-o', file: 'balancesheet', period: false },
 	{ key: 'balanco',     label: 'Balanço',     icon: 'fa-balance-scale', file: 'balanco',    period: false },
 	{ key: 'settings',    label: 'Settings',    icon: 'fa-cog',         file: 'settings',    period: false }
 ];
@@ -650,7 +650,7 @@ isoft_insights.App = class App {
 // --------------------------------------------------------------------------- //
 isoft_insights.REPORT_SETTINGS = {
 	pl: {
-		title: 'Cálculo de Lucros e Perdas — Contas',
+		title: 'Demonstração de Resultados — Contas',
 		report: 'pl',
 		getter: 'get_angola_pl_settings',
 		saver: 'save_angola_pl_settings',

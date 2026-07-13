@@ -22,7 +22,7 @@ from frappe.utils import (
 
 SETTINGS_DOCTYPE = "Isoft Insights Settings"
 ANGOLA_PL_DOCTYPE = "Isoft Angola Income Statement Settings"
-ANGOLA_PL_TITLE = "Cálculo de Lucros e Perdas (Profits and Loss)"
+ANGOLA_PL_TITLE = "Demonstração de Resultados"
 
 
 # --------------------------------------------------------------------------- #

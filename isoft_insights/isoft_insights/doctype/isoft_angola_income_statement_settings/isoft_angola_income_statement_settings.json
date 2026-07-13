@@ -54,7 +54,7 @@
    "label": "Enabled"
   },
   {
-   "default": "Cálculo de Lucros e Perdas (Profits and Loss)",
+   "default": "Demonstração de Resultados",
    "fieldname": "statement_title",
    "fieldtype": "Data",
    "label": "Statement Title"
