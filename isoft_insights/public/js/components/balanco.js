@@ -97,6 +97,18 @@ function fmt(value) {
 	return (n < 0 ? '-' : '') + parts[0] + ',' + parts[1];
 }
 
+function varCell(r) {
+	if (r.variation == null) return '<td class="bs-num"></td>';
+	const cls = r.status === 'good' ? 'v-good' : (r.status === 'bad' ? 'v-bad' : 'v-flat');
+	const diff = flt(r.variation);
+	const arrow = Math.abs(diff) < 0.005 ? '' : (diff > 0 ? '▲' : '▼');
+	const amt = (diff > 0 ? '+' : '') + fmt(diff);
+	const pct = (r.variation_pct == null)
+		? '—'
+		: `${r.variation_pct > 0 ? '+' : ''}${flt(r.variation_pct).toFixed(1)}%`;
+	return `<td class="bs-num v-cell ${cls}"><span class="v-arrow">${arrow}</span> <span class="v-pct-main">${pct}</span> <span class="v-amt">${amt}</span></td>`;
+}
+
 function renderStatement($body, data) {
 	const esc = isoft_insights.util.esc;
 	const neg = (v) => (flt(v) < 0 ? 'bs-neg' : '');
@@ -104,7 +116,7 @@ function renderStatement($body, data) {
 	const rows = (data.rows || []).map((r) => {
 		if (r.is_header) {
 			const cls = r.kind === 'header' ? 'bs-section' : 'bs-subsection';
-			return `<tr class="${cls}"><td colspan="6">${esc(r.label)}</td></tr>`;
+			return `<tr class="${cls}"><td colspan="7">${esc(r.label)}</td></tr>`;
 		}
 		let cls = '';
 		if (r.strong) cls = 'bs-grand';
@@ -117,6 +129,7 @@ function renderStatement($body, data) {
 				<td class="bs-num ${neg(r.amort)}">${fmt(r.amort)}</td>
 				<td class="bs-num ${neg(r.liquido)}">${fmt(r.liquido)}</td>
 				<td class="bs-num bs-prev ${neg(r.liquido_prev)}">${fmt(r.liquido_prev)}</td>
+				${varCell(r)}
 			</tr>`;
 	}).join('');
 
@@ -148,6 +161,7 @@ function renderStatement($body, data) {
 							<th class="bs-notas" rowspan="2">Notas</th>
 							<th class="bs-num" colspan="3">${esc(data.current_label)}</th>
 							<th class="bs-num" rowspan="2">${esc(data.previous_label)}<br><span class="bs-sublabel">Valor líquido</span></th>
+							<th class="bs-num" rowspan="2">Variação<br><span class="bs-sublabel">${esc(data.current_label)} vs ${esc(data.previous_label)}</span></th>
 						</tr>
 						<tr class="bs-subhead">
 							<th class="bs-num">Valor bruto</th>
@@ -192,6 +206,13 @@ function injectStyles() {
 	.bs-table-4 tr.bs-grand td { font-weight:800; background:var(--ii-bg); border-top:2px solid var(--ii-primary); border-bottom:2px solid var(--ii-primary); }
 	.bs-table-4 td.bs-neg { color:#dc2626; }
 	.bs-table-4 tbody tr:not(.bs-section):not(.bs-subsection):hover td { background:var(--ii-bg); }
+	.bs-table-4 .v-cell { font-weight:700; }
+	.bs-table-4 .v-cell .v-arrow { font-size:10px; margin-right:1px; }
+	.bs-table-4 .v-cell .v-pct-main { font-weight:700; font-size:13.5px; }
+	.bs-table-4 .v-cell .v-amt { font-weight:500; font-size:11px; opacity:.75; margin-left:5px; }
+	.bs-table-4 .v-good { color:#059669; }
+	.bs-table-4 .v-bad { color:#dc2626; }
+	.bs-table-4 .v-flat { color:var(--ii-muted); }
 	@media print { .ii-bar, .ii-rowfilters { display:none !important; } .bs-card { box-shadow:none; border:none; } }
 	</style>`;
 	$('head').append(css);

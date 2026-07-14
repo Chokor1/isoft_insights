@@ -11,7 +11,9 @@ isoft_insights.views.receivables = function (ctx) {
 		as_on: frappe.datetime.get_today(), only_overdue: 0, search: '', colf: {}
 	};
 	st.colf = st.colf || {};
+	st.sort = st.sort || { col: null, dir: 'desc' };
 	const esc = isoft_insights.util.esc;
+	injectSortStyles();
 
 	ctx.$content.html(`
 		<div class="ii-card">
@@ -56,6 +58,10 @@ isoft_insights.views.receivables = function (ctx) {
 		{ id: 'balance', get: (r) => flt(r.balance) },
 	];
 
+	// Sort value getters: numeric columns reuse NUMCOLS; customer sorts by name.
+	const sortGetters = { customer: (r) => (r.customer_name || r.customer || '').toLowerCase() };
+	NUMCOLS.forEach((c) => { sortGetters[c.id] = c.get; });
+
 	// Parse a numeric filter like ">1000", "<= 50", "=0", "100-200" into a predicate.
 	const numPred = (raw) => {
 		const s = (raw || '').trim();
@@ -83,7 +89,18 @@ isoft_insights.views.receivables = function (ctx) {
 			return (!term || name.includes(term) || code.includes(term)) &&
 				(!cf || name.includes(cf) || code.includes(cf));
 		};
-		return lastRows.filter((r) => matchCust(r) && preds.every((c) => c.p(c.get(r))));
+		const out = lastRows.filter((r) => matchCust(r) && preds.every((c) => c.p(c.get(r))));
+		const g = st.sort.col && sortGetters[st.sort.col];
+		if (g) {
+			const dir = st.sort.dir === 'asc' ? 1 : -1;
+			out.sort((a, b) => {
+				const va = g(a), vb = g(b);
+				if (va < vb) return -dir;
+				if (va > vb) return dir;
+				return 0;
+			});
+		}
+		return out;
 	};
 
 	const fInput = (id, ph) => `<input type="text" class="ii-colf form-control" data-col="${id}" value="${esc(st.colf[id] || '')}" placeholder="${ph}">`;
@@ -128,6 +145,16 @@ isoft_insights.views.receivables = function (ctx) {
 			</tr>`);
 	};
 
+	// Reflect the active sort column/direction in the header arrows.
+	const updateSortIndicators = () => {
+		ctx.$content.find('.ii-sortable').each(function () {
+			const col = $(this).data('sort');
+			const active = st.sort.col === col;
+			$(this).toggleClass('sorted', active);
+			$(this).find('.ii-sort-ind').text(active ? (st.sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
+		});
+	};
+
 	// Build the static table shell (title + header + filter row); rows via paint().
 	const renderTable = () => {
 		ctx.$content.find('#ii-rec-body').html(`
@@ -137,11 +164,11 @@ isoft_insights.views.receivables = function (ctx) {
 			<table class="ii-table">
 				<thead>
 					<tr>
-						<th>Customer</th><th class="ii-num">Inv.</th>
-						<th class="ii-num">Current</th><th class="ii-num">1–30</th><th class="ii-num">31–60</th>
-						<th class="ii-num">61–90</th><th class="ii-num">90+</th><th class="ii-num">Total Outstanding</th>
-						<th class="ii-num">Total Overdue</th>
-						<th class="ii-num">Balance</th>
+						<th class="ii-sortable" data-sort="customer">Customer<span class="ii-sort-ind"></span></th><th class="ii-num ii-sortable" data-sort="invoice_count">Inv.<span class="ii-sort-ind"></span></th>
+						<th class="ii-num ii-sortable" data-sort="current_amt">Current<span class="ii-sort-ind"></span></th><th class="ii-num ii-sortable" data-sort="b1_30">1–30<span class="ii-sort-ind"></span></th><th class="ii-num ii-sortable" data-sort="b31_60">31–60<span class="ii-sort-ind"></span></th>
+						<th class="ii-num ii-sortable" data-sort="b61_90">61–90<span class="ii-sort-ind"></span></th><th class="ii-num ii-sortable" data-sort="b90_plus">90+<span class="ii-sort-ind"></span></th><th class="ii-num ii-sortable" data-sort="total_outstanding">Total Outstanding<span class="ii-sort-ind"></span></th>
+						<th class="ii-num ii-sortable" data-sort="overdue">Total Overdue<span class="ii-sort-ind"></span></th>
+						<th class="ii-num ii-sortable" data-sort="balance">Balance<span class="ii-sort-ind"></span></th>
 					</tr>
 					<tr class="ii-filterrow">
 						<td>${fInput('customer', 'Customer…')}</td>
@@ -210,6 +237,29 @@ isoft_insights.views.receivables = function (ctx) {
 			.catch(() => $detail.find('td').html('<div style="color:var(--ii-muted)">Could not load invoices.</div>'));
 	});
 
+	// Click a column header to sort (toggle asc/desc; numeric defaults to desc, text to asc).
+	ctx.$content.off('click', '.ii-sortable').on('click', '.ii-sortable', function () {
+		const col = $(this).data('sort');
+		if (st.sort.col === col) {
+			st.sort.dir = st.sort.dir === 'asc' ? 'desc' : 'asc';
+		} else {
+			st.sort.col = col;
+			st.sort.dir = (col === 'customer') ? 'asc' : 'desc';
+		}
+		updateSortIndicators();
+		paint();
+	});
+
+	function injectSortStyles() {
+		if (document.getElementById('ii-rec-sort-styles')) return;
+		$('head').append(`<style id="ii-rec-sort-styles">
+			.ii-table th.ii-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+			.ii-table th.ii-sortable:hover { color: var(--ii-primary); }
+			.ii-table th.ii-sortable.sorted { color: var(--ii-primary); }
+			.ii-table th .ii-sort-ind { font-size: 10px; }
+		</style>`);
+	}
+
 	const load = () => {
 		ctx.$content.find('#ii-rec-body').html('<div class="ii-loading"><i class="fa fa-spinner fa-spin"></i> Loading…</div>');
 		ctx.api('get_customer_balance', {
@@ -218,6 +268,7 @@ isoft_insights.views.receivables = function (ctx) {
 			lastRows = (data && data.rows) || [];
 			renderKpis((data && data.totals) || {});
 			renderTable();
+			updateSortIndicators();
 		}).catch(() => ctx.$content.find('#ii-rec-body').html(isoft_insights.util.empty('Could not load receivables.')));
 	};
 

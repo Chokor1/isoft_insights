@@ -97,6 +97,26 @@ def _company_currency(company):
 	return frappe.db.get_default("currency") or "USD"
 
 
+def _variation(cur, prev, polarity="good_up"):
+	"""Year-over-year change: (amount, pct, status).
+
+	status is 'good' | 'bad' | 'flat' from the viewer's perspective. For revenue /
+	result / asset lines (good_up) an increase is good; for cost / tax / liability
+	lines (good_down) a decrease is good.
+	"""
+	if cur is None or prev is None:
+		return None, None, None
+	diff = flt(cur) - flt(prev)
+	pct = (diff / abs(flt(prev)) * 100.0) if flt(prev) else None
+	if abs(diff) < 0.005:
+		status = "flat"
+	elif polarity == "good_down":
+		status = "good" if diff < 0 else "bad"
+	else:
+		status = "good" if diff > 0 else "bad"
+	return diff, pct, status
+
+
 def _resolve_period(period=None, from_date=None, to_date=None):
 	"""Return (from_date, to_date) as date objects.
 
@@ -803,6 +823,12 @@ ANGOLA_ACCOUNT_FIELDS = [f["field"] for f in ANGOLA_STATEMENT if f["kind"] == "m
 	fld for f in ANGOLA_STATEMENT if f["kind"] == "net" for fld in f["fields"]
 ]
 
+# Lines where a HIGHER value is unfavorable (costs & taxes) — drives variation colour.
+PL_COST_CODES = {
+	"variacoes", "trabalhos", "cmvmc", "custos_pessoal", "amortizacoes", "outros_custos_op",
+	"total_custos_op", "impostos_rendimento", "imposto_rend_extra",
+}
+
 # Standard Angola (PGC-A) account numbers per settings field. Used by the
 # "auto-fill standard accounts" action to resolve each field to the real account
 # in the selected company's chart (matched by Account Number). None = no standard
@@ -1050,6 +1076,10 @@ def get_angola_income_statement(fiscal_year=None, company=None):
 
 	rows = []
 	for line in ANGOLA_STATEMENT:
+		cur_v = flt(cur.get(line["code"]))
+		prev_v = flt(prev.get(line["code"]))
+		pol = "good_down" if line["code"] in PL_COST_CODES else "good_up"
+		var, pct, status = _variation(cur_v, prev_v, pol)
 		rows.append(
 			{
 				"row_code": line["code"],
@@ -1058,8 +1088,11 @@ def get_angola_income_statement(fiscal_year=None, company=None):
 				"line_type": "Formula" if line["kind"] == "formula" else "Account",
 				"bold": cint(line.get("bold")),
 				"indent": 0,
-				"current": flt(cur.get(line["code"])),
-				"previous": flt(prev.get(line["code"])),
+				"current": cur_v,
+				"previous": prev_v,
+				"variation": var,
+				"variation_pct": pct,
+				"status": status,
 			}
 		)
 
@@ -1140,6 +1173,12 @@ ANGOLA_BS = [
 	{"code": "total_pc", "label": "TOTAL DO PASSIVO CORRENTE", "kind": "total", "members": ["contas_pagar", "emprestimos_cp", "parte_corr_mlp", "outros_passivos_corr"], "bold": 1},
 	{"code": "total_cpp", "label": "TOTAL DO CAPITAL PRÓPRIO E PASSIVO", "kind": "total", "members": ["total_cp", "total_pnc", "total_pc"], "bold": 1, "strong": 1},
 ]
+
+# Lines that are liabilities — a HIGHER balance is unfavorable (drives variation colour).
+BS_LIABILITY_CODES = {
+	"emprestimos_mlp", "impostos_diferidos", "prov_clientes", "prov_riscos", "outros_passivos_nao_corr",
+	"total_pnc", "contas_pagar", "emprestimos_cp", "parte_corr_mlp", "outros_passivos_corr", "total_pc",
+}
 
 ANGOLA_BS_ACCOUNT_FIELDS = [
 	"bs_imob_corp", "bs_imob_corp_amort", "bs_imob_incorp", "bs_imob_incorp_amort",
@@ -1339,6 +1378,11 @@ def get_angola_balance_sheet(fiscal_year=None, company=None):
 		cb, ca, cl = cur[line["code"]]
 		_pb, _pa, pl = prev[line["code"]]
 		is_header = line["kind"] in ("header", "subheader")
+		# Liabilities: a higher balance is unfavorable; assets & equity: higher is favorable.
+		pol = "good_down" if line["code"] in BS_LIABILITY_CODES else "good_up"
+		var, pct, status = (None, None, None)
+		if not is_header:
+			var, pct, status = _variation(cl, pl, pol)
 		rows.append(
 			{
 				"row_code": line["code"],
@@ -1352,6 +1396,9 @@ def get_angola_balance_sheet(fiscal_year=None, company=None):
 				"amort": None if is_header else ca,
 				"liquido": None if is_header else cl,
 				"liquido_prev": None if is_header else pl,
+				"variation": var,
+				"variation_pct": pct,
+				"status": status,
 			}
 		)
 

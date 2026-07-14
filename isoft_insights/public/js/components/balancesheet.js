@@ -97,12 +97,24 @@ function fmt(value) {
 	return (n < 0 ? '-' : '') + parts[0] + ',' + parts[1];
 }
 
+function varCell(r) {
+	if (r.variation == null) return '<td class="bs-num"></td>';
+	const cls = r.status === 'good' ? 'v-good' : (r.status === 'bad' ? 'v-bad' : 'v-flat');
+	const diff = flt(r.variation);
+	const arrow = Math.abs(diff) < 0.005 ? '' : (diff > 0 ? '▲' : '▼');
+	const amt = (diff > 0 ? '+' : '') + fmt(diff);
+	const pct = (r.variation_pct == null)
+		? '—'
+		: `${r.variation_pct > 0 ? '+' : ''}${flt(r.variation_pct).toFixed(1)}%`;
+	return `<td class="bs-num v-cell ${cls}"><span class="v-arrow">${arrow}</span> <span class="v-pct-main">${pct}</span> <span class="v-amt">${amt}</span></td>`;
+}
+
 function renderStatement($body, data) {
 	const esc = isoft_insights.util.esc;
 	const cur = data.currency;
 	const rows = (data.rows || []).map((r) => {
 		if (r.line_type === 'Header') {
-			return `<tr class="bs-header"><td colspan="2">${esc(r.label)}</td><td colspan="2">${esc(r.notas)}</td></tr>`;
+			return `<tr class="bs-header"><td colspan="2">${esc(r.label)}</td><td colspan="3">${esc(r.notas)}</td></tr>`;
 		}
 		const cls = r.bold ? 'bs-total' : '';
 		const neg = (v) => (flt(v) < 0 ? 'bs-neg' : '');
@@ -113,6 +125,7 @@ function renderStatement($body, data) {
 				<td class="bs-notas">${esc(r.notas)}</td>
 				<td class="bs-num ${neg(r.current)}">${fmt(r.current)}</td>
 				<td class="bs-num bs-prev ${neg(r.previous)}">${fmt(r.previous)}</td>
+				${varCell(r)}
 			</tr>`;
 	}).join('');
 
@@ -139,6 +152,7 @@ function renderStatement($body, data) {
 							<th class="bs-notas" rowspan="2">Notas</th>
 							<th class="bs-num">${esc(data.current_label)}</th>
 							<th class="bs-num">${esc(data.previous_label)}</th>
+							<th class="bs-num" rowspan="2">Variação<br><span class="bs-sublabel">${esc(data.current_label)} vs ${esc(data.previous_label)}</span></th>
 						</tr>
 						<tr class="bs-subhead">
 							<th class="bs-num">Valor líquido</th>
@@ -181,6 +195,14 @@ function injectStyles() {
 		color:var(--ii-primary); background:var(--ii-bg); padding-top:12px; }
 	.bs-table td.bs-neg { color:#dc2626; }
 	.bs-table tbody tr:hover td { background:var(--ii-bg); }
+	.bs-sublabel { font-weight:500; color:var(--ii-muted); font-size:10px; }
+	.v-cell { font-weight:700; }
+	.v-cell .v-arrow { font-size:10px; margin-right:1px; }
+	.v-cell .v-pct-main { font-weight:700; font-size:13.5px; }
+	.v-cell .v-amt { font-weight:500; font-size:11px; opacity:.75; margin-left:5px; }
+	.v-good { color:#059669; }
+	.v-bad { color:#dc2626; }
+	.v-flat { color:var(--ii-muted); }
 	@media print {
 		.ii-bar, .ii-rowfilters { display:none !important; }
 		.bs-card { box-shadow:none; border:none; }

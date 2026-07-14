@@ -798,35 +798,47 @@ isoft_insights.printStatement = function (kind, data) {
 		return (n < 0 ? '-' : '') + parts[0] + ',' + parts[1];
 	};
 
+	const pvar = (r) => {
+		if (r.variation == null) return '<td class="num"></td>';
+		const cls = r.status === 'good' ? 'vg' : (r.status === 'bad' ? 'vb' : 'vf');
+		const diff = flt(r.variation);
+		const arrow = Math.abs(diff) < 0.005 ? '' : (diff > 0 ? '▲' : '▼');
+		const amt = (diff > 0 ? '+' : '') + fmt(diff);
+		const pct = (r.variation_pct == null) ? '—' : ((r.variation_pct > 0 ? '+' : '') + flt(r.variation_pct).toFixed(1) + '%');
+		return `<td class="num ${cls}">${arrow} ${pct} <span class="pp">${amt}</span></td>`;
+	};
+
 	let head, body;
 	if (kind === 'bs') {
 		head = `<tr>
 				<th class="l" rowspan="2">Descrição</th><th class="n" rowspan="2">Notas</th>
 				<th class="num" colspan="3">${esc(data.current_label)}</th>
 				<th class="num" rowspan="2">${esc(data.previous_label)}<br><span class="sub">Valor líquido</span></th>
+				<th class="num" rowspan="2">Variação</th>
 			</tr>
 			<tr><th class="num sub">Valor bruto</th><th class="num sub">Amortizações</th><th class="num sub">Valor líquido</th></tr>`;
 		body = (data.rows || []).map((r) => {
 			if (r.is_header) {
 				const c = r.kind === 'header' ? 'sec' : 'subsec';
-				return `<tr class="${c}"><td colspan="6">${esc(r.label)}</td></tr>`;
+				return `<tr class="${c}"><td colspan="7">${esc(r.label)}</td></tr>`;
 			}
 			const c = r.strong ? 'grand' : (r.bold ? 'tot' : '');
 			return `<tr class="${c}"><td class="l">${esc(r.label)}</td><td class="n">${esc(r.notas)}</td>
 				<td class="num">${fmt(r.bruto)}</td><td class="num">${fmt(r.amort)}</td>
-				<td class="num">${fmt(r.liquido)}</td><td class="num">${fmt(r.liquido_prev)}</td></tr>`;
+				<td class="num">${fmt(r.liquido)}</td><td class="num">${fmt(r.liquido_prev)}</td>${pvar(r)}</tr>`;
 		}).join('');
 	} else {
 		head = `<tr>
 				<th class="l">Descrição</th><th class="n">Notas</th>
 				<th class="num">${esc(data.current_label)}<br><span class="sub">Valor líquido</span></th>
 				<th class="num">${esc(data.previous_label)}<br><span class="sub">Valor líquido</span></th>
+				<th class="num">Variação</th>
 			</tr>`;
 		body = (data.rows || []).map((r) => {
-			if (r.line_type === 'Header') return `<tr class="sec"><td colspan="4">${esc(r.label)}</td></tr>`;
+			if (r.line_type === 'Header') return `<tr class="sec"><td colspan="5">${esc(r.label)}</td></tr>`;
 			const c = r.bold ? 'tot' : '';
 			return `<tr class="${c}"><td class="l">${esc(r.label)}</td><td class="n">${esc(r.notas)}</td>
-				<td class="num">${fmt(r.current)}</td><td class="num">${fmt(r.previous)}</td></tr>`;
+				<td class="num">${fmt(r.current)}</td><td class="num">${fmt(r.previous)}</td>${pvar(r)}</tr>`;
 		}).join('');
 	}
 
@@ -851,6 +863,10 @@ isoft_insights.printStatement = function (kind, data) {
 			tr.subsec td { font-weight: 700; background: #f9fafb; }
 			tr.tot td { font-weight: 700; background: #f9fafb; }
 			tr.grand td { font-weight: 800; border-top: 1.5px solid #1f2937; border-bottom: 1.5px solid #1f2937; }
+			td.vg { color: #059669; font-weight: 700; }
+			td.vb { color: #dc2626; font-weight: 700; }
+			td.vf { color: #9ca3af; }
+			.pp { font-size: 10px; opacity: .85; margin-left: 3px; }
 			.foot { margin-top: 16px; font-size: 10px; color: #9ca3af; text-align: right; }
 			@media print { body { margin: 12mm; } @page { size: A4 portrait; } }
 		</style></head>
