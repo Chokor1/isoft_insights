@@ -84,7 +84,7 @@ function loadStatement(ctx, state) {
 	ctx.api('get_angola_balance_sheet', {
 		fiscal_year: state.fy || null,
 		company: ctx.app.state.company || null
-	}).then((data) => { state.data = data; renderStatement($body, data); })
+	}).then((data) => { state.data = data; renderStatement(ctx, state, $body, data); })
 		.catch(() => $body.html(isoft_insights.util.empty('Could not compute the Balanço.')));
 }
 
@@ -109,7 +109,60 @@ function varCell(r) {
 	return `<td class="bs-num v-cell ${cls}"><span class="v-arrow">${arrow}</span> <span class="v-pct-main">${pct}</span> <span class="v-amt">${amt}</span></td>`;
 }
 
-function renderStatement($body, data) {
+function drillChildRow(n, rowcode, level) {
+	const esc = isoft_insights.util.esc;
+	const pad = 22 + level * 16;
+	const dr = n.is_group ? 'bs-dr' : '';
+	const caret = n.is_group ? '<i class="fa fa-chevron-right bs-caret"></i>' : '<i class="bs-caret-space"></i>';
+	const nm = (n.number ? esc(n.number) + ' · ' : '') + esc(n.name);
+	const neg = (v) => (flt(v) < 0 ? 'bs-neg' : '');
+	return `<tr class="bs-drill-child ${dr}" data-rowcode="${esc(rowcode)}" data-account="${esc(n.account)}" data-level="${level}">
+		<td class="bs-label" style="padding-left:${pad}px">${caret}${nm}</td>
+		<td class="bs-notas"></td>
+		<td class="bs-num"></td>
+		<td class="bs-num"></td>
+		<td class="bs-num ${neg(n.current)}">${fmt(n.current)}</td>
+		<td class="bs-num bs-prev ${neg(n.previous)}">${fmt(n.previous)}</td>
+		${varCell(n)}
+	</tr>`;
+}
+
+function removeSubtree($row, level) {
+	let $n = $row.next();
+	while ($n.length && $n.hasClass('bs-drill-child') && parseInt($n.attr('data-level') || '0', 10) > level) {
+		const $next = $n.next();
+		$n.remove();
+		$n = $next;
+	}
+}
+
+function toggleDrill(ctx, state, $row) {
+	const level = parseInt($row.attr('data-level') || '0', 10);
+	if ($row.hasClass('open')) {
+		removeSubtree($row, level);
+		$row.removeClass('open').find('.bs-caret').first().removeClass('down');
+		return;
+	}
+	const rowcode = $row.attr('data-rowcode');
+	const account = $row.attr('data-account') || null;
+	const pad = 22 + (level + 1) * 16;
+	const $load = $(`<tr class="bs-drill-child" data-level="${level + 1}"><td colspan="7" style="padding-left:${pad}px;color:var(--ii-muted);font-size:12px;"><i class="fa fa-spinner fa-spin"></i> A carregar…</td></tr>`);
+	$row.after($load);
+	$row.addClass('open').find('.bs-caret').first().addClass('down');
+	ctx.api('drill_balance_sheet', { row_code: rowcode, account: account, fiscal_year: state.fy || null, company: ctx.app.state.company || null })
+		.then((res) => {
+			$load.remove();
+			const nodes = (res && res.rows) || [];
+			if (!nodes.length) {
+				$row.after(`<tr class="bs-drill-child" data-level="${level + 1}"><td colspan="7" style="padding-left:${pad}px;color:var(--ii-muted);font-size:12px;">Sem detalhe adicional.</td></tr>`);
+				return;
+			}
+			$row.after(nodes.map((n) => drillChildRow(n, rowcode, level + 1)).join(''));
+		})
+		.catch(() => { $load.remove(); $row.removeClass('open').find('.bs-caret').first().removeClass('down'); });
+}
+
+function renderStatement(ctx, state, $body, data) {
 	const esc = isoft_insights.util.esc;
 	const neg = (v) => (flt(v) < 0 ? 'bs-neg' : '');
 
@@ -118,12 +171,12 @@ function renderStatement($body, data) {
 			const cls = r.kind === 'header' ? 'bs-section' : 'bs-subsection';
 			return `<tr class="${cls}"><td colspan="7">${esc(r.label)}</td></tr>`;
 		}
-		let cls = '';
-		if (r.strong) cls = 'bs-grand';
-		else if (r.bold) cls = 'bs-total';
+		let cls = r.strong ? 'bs-grand' : (r.bold ? 'bs-total' : '');
+		if (r.drillable) cls += ' bs-dr';
+		const caret = r.drillable ? '<i class="fa fa-chevron-right bs-caret"></i>' : '';
 		return `
-			<tr class="${cls}">
-				<td class="bs-label">${esc(r.label)}</td>
+			<tr class="${cls}" data-rowcode="${esc(r.row_code)}" data-level="0">
+				<td class="bs-label">${caret}${esc(r.label)}</td>
 				<td class="bs-notas">${esc(r.notas)}</td>
 				<td class="bs-num ${neg(r.bruto)}">${fmt(r.bruto)}</td>
 				<td class="bs-num ${neg(r.amort)}">${fmt(r.amort)}</td>
@@ -175,6 +228,9 @@ function renderStatement($body, data) {
 		</div>
 	`);
 	injectStyles();
+	$body.off('click', 'tr.bs-dr').on('click', 'tr.bs-dr', function () {
+		toggleDrill(ctx, state, $(this));
+	});
 }
 
 function injectStyles() {
@@ -213,6 +269,14 @@ function injectStyles() {
 	.bs-table-4 .v-good { color:#059669; }
 	.bs-table-4 .v-bad { color:#dc2626; }
 	.bs-table-4 .v-flat { color:var(--ii-muted); }
+	.bs-table-4 tr.bs-dr { cursor:pointer; }
+	.bs-table-4 tr.bs-dr:hover td { background:var(--ii-bg); }
+	.bs-table-4 .bs-caret { color:var(--ii-muted); font-size:11px; margin-right:7px; display:inline-block; transition:transform .15s ease; }
+	.bs-table-4 .bs-caret.down { transform:rotate(90deg); color:var(--ii-primary); }
+	.bs-table-4 .bs-caret-space { display:inline-block; width:11px; margin-right:7px; }
+	.bs-table-4 tr.bs-drill-child td { background:rgba(37,99,235,0.035); font-size:12.5px; }
+	.bs-table-4 tr.bs-drill-child td.bs-label { color:var(--ii-text); }
+	[data-theme="dark"] .bs-table-4 tr.bs-drill-child td { background:rgba(59,130,246,0.07); }
 	@media print { .ii-bar, .ii-rowfilters { display:none !important; } .bs-card { box-shadow:none; border:none; } }
 	</style>`;
 	$('head').append(css);

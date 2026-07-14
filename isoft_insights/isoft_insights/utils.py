@@ -1080,6 +1080,11 @@ def get_angola_income_statement(fiscal_year=None, company=None):
 		prev_v = flt(prev.get(line["code"]))
 		pol = "good_down" if line["code"] in PL_COST_CODES else "good_up"
 		var, pct, status = _variation(cur_v, prev_v, pol)
+		drillable = 0
+		if line["kind"] == "magnitude" and doc.get(line["field"]):
+			drillable = 1
+		elif line["kind"] == "net" and any(doc.get(f) for f in line["fields"]):
+			drillable = 1
 		rows.append(
 			{
 				"row_code": line["code"],
@@ -1093,6 +1098,7 @@ def get_angola_income_statement(fiscal_year=None, company=None):
 				"variation": var,
 				"variation_pct": pct,
 				"status": status,
+				"drillable": drillable,
 			}
 		)
 
@@ -1383,6 +1389,11 @@ def get_angola_balance_sheet(fiscal_year=None, company=None):
 		var, pct, status = (None, None, None)
 		if not is_header:
 			var, pct, status = _variation(cl, pl, pol)
+		drillable = 0
+		if line["kind"] in ("asset", "liab") and doc.get(line["field"]):
+			drillable = 1
+		elif line["kind"] == "asset_dep" and (doc.get(line["field"]) or doc.get(line.get("amort_field"))):
+			drillable = 1
 		rows.append(
 			{
 				"row_code": line["code"],
@@ -1399,6 +1410,7 @@ def get_angola_balance_sheet(fiscal_year=None, company=None):
 				"variation": var,
 				"variation_pct": pct,
 				"status": status,
+				"drillable": drillable,
 			}
 		)
 
@@ -1506,3 +1518,118 @@ def resolve_standard_accounts(report, company):
 		else:
 			not_found.append(number)
 	return {"accounts": accounts, "not_found": sorted(not_found)}
+
+
+# --------------------------------------------------------------------------- #
+# Drill-down: expand a report line into its child accounts (recursively)
+# --------------------------------------------------------------------------- #
+def _children_of(account, company):
+	"""Immediate child accounts of a group account, ordered by number."""
+	if not account:
+		return []
+	return frappe.get_all(
+		"Account",
+		filters={"parent_account": account, "company": company},
+		pluck="name",
+		order_by="account_number, account_name",
+	)
+
+
+def _node_value(account, mode, start, end):
+	"""Presented value of one account's sub-tree.
+
+	mode 'cd'  -> credit - debit (income positive, expense negative) — for P&L net lines.
+	mode 'magnitude' -> natural positive by root type (income/liab/equity = credit-debit,
+	                    asset/expense = debit-credit) — everything else.
+	"""
+	cd, root = _account_credit_debit(account, start, end)
+	if cd is None:
+		return 0.0
+	if mode == "cd":
+		return cd
+	return cd if root in ("Income", "Liability", "Equity") else -cd
+
+
+def _drill_nodes(accounts, mode, polarity, start, end, prev_start, prev_end):
+	rows = []
+	for acc in accounts:
+		info = frappe.db.get_value(
+			"Account", acc, ["account_number", "account_name", "is_group"], as_dict=True
+		)
+		if not info:
+			continue
+		cur_v = _node_value(acc, mode, start, end)
+		prev_v = _node_value(acc, mode, prev_start, prev_end)
+		var, pct, status = _variation(cur_v, prev_v, polarity)
+		rows.append(
+			{
+				"account": acc,
+				"number": info.account_number or "",
+				"name": info.account_name or acc,
+				"is_group": cint(info.is_group),
+				"current": cur_v,
+				"previous": prev_v,
+				"variation": var,
+				"variation_pct": pct,
+				"status": status,
+			}
+		)
+	return rows
+
+
+def _drill_context(doc, fiscal_year, company):
+	company = company or doc.default_company or frappe.defaults.get_user_default("Company")
+	if not company:
+		company = frappe.db.get_value("Company", {}, "name")
+	fiscal_year = fiscal_year or doc.default_fiscal_year
+	if not fiscal_year:
+		fy = frappe.get_all("Fiscal Year", fields=["name"], order_by="year_start_date desc", limit=1)
+		fiscal_year = fy[0].name if fy else None
+	start, end = _fiscal_year_range(fiscal_year)
+	prev_start, prev_end = _prev_fiscal_year_range(start, end)
+	return company, start, end, prev_start, prev_end
+
+
+@frappe.whitelist()
+def drill_income_statement(row_code, account=None, fiscal_year=None, company=None):
+	"""Children of a P&L line's account (or of a given account, for deeper levels)."""
+	_assert_access()
+	line = next((l for l in ANGOLA_STATEMENT if l["code"] == row_code), None)
+	if not line or line["kind"] == "formula":
+		return {"rows": []}
+
+	doc = frappe.get_single(ANGOLA_PL_DOCTYPE)
+	company, start, end, prev_start, prev_end = _drill_context(doc, fiscal_year, company)
+	mode = "cd" if line["kind"] == "net" else "magnitude"
+	polarity = "good_down" if row_code in PL_COST_CODES else "good_up"
+
+	if account:
+		accounts = _children_of(account, company)
+	elif line["kind"] == "magnitude":
+		accounts = _children_of(doc.get(line["field"]), company)
+	else:  # net — first level shows the mapped accounts themselves
+		accounts = [doc.get(f) for f in line["fields"] if doc.get(f)]
+
+	return {"rows": _drill_nodes(accounts, mode, polarity, start, end, prev_start, prev_end)}
+
+
+@frappe.whitelist()
+def drill_balance_sheet(row_code, account=None, fiscal_year=None, company=None):
+	"""Children of a Balanço line's account (or of a given account, for deeper levels)."""
+	_assert_access()
+	line = next((l for l in ANGOLA_BS if l["code"] == row_code), None)
+	if not line or line["kind"] in ("total", "header", "subheader", "pl_result"):
+		return {"rows": []}
+
+	doc = frappe.get_single(ANGOLA_BS_DOCTYPE)
+	company, start, end, prev_start, prev_end = _drill_context(doc, fiscal_year, company)
+	polarity = "good_down" if row_code in BS_LIABILITY_CODES else "good_up"
+
+	if account:
+		accounts = _children_of(account, company)
+	elif line["kind"] == "asset_dep":
+		accounts = [a for a in (doc.get(line["field"]), doc.get(line.get("amort_field"))) if a]
+	else:  # asset / liab — first level shows the mapped account's children
+		accounts = _children_of(doc.get(line["field"]), company)
+
+	return {"rows": _drill_nodes(accounts, "magnitude", polarity, start, end, prev_start, prev_end)}
