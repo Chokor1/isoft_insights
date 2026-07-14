@@ -16,7 +16,7 @@
 				// clicks and routes /app/* links in the same tab; it only skips
 				// links that already have an onclick attribute.
 				const icon = `
-					<li class='nav-item dropdown dropdown-notifications dropdown-mobile insights-icon' title="Isoft Insights - Sales Analytics" aria-label="Isoft Insights">
+					<li class='nav-item dropdown dropdown-notifications dropdown-mobile insights-icon' title="Isoft Insights - Sales &amp; Purchase" aria-label="Isoft Insights">
 						<a href="/app/isoft-insights" class="insights-button" id="isoft-insights-navbar" target="_blank" rel="noopener"
 							onclick="window.open('/app/isoft-insights', '_blank'); return false;">
 							<i class="fa fa-line-chart"></i>

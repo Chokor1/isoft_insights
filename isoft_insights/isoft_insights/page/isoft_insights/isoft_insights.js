@@ -25,6 +25,7 @@ isoft_insights.VIEWS = [
 	{ key: 'matrix',      label: 'Matrix',      icon: 'fa-th',          file: 'matrix',      period: false },
 	{ key: 'salesteam',   label: 'Sales Team',  icon: 'fa-user-circle', file: 'salesteam',   period: true },
 	{ key: 'receivables', label: 'Receivables', icon: 'fa-credit-card', file: 'receivables', period: false },
+	{ key: 'payables',    label: 'Payables',    icon: 'fa-money',       file: 'payables',    period: false },
 	{ key: 'balancesheet', label: 'Demonstração de Resultados', icon: 'fa-file-text-o', file: 'balancesheet', period: false },
 	{ key: 'balanco',     label: 'Balanço',     icon: 'fa-balance-scale', file: 'balanco',    period: false },
 	{ key: 'settings',    label: 'Settings',    icon: 'fa-cog',         file: 'settings',    period: false }
@@ -34,7 +35,7 @@ isoft_insights.VIEWS = [
 // plain button. `key` must be unique; `views` reference isoft_insights.VIEWS keys.
 isoft_insights.GROUPS = [
 	{ key: 'sales',      label: 'Sales',      icon: 'fa-line-chart', views: ['overview', 'customers', 'items', 'matrix', 'salesteam'] },
-	{ key: 'accounting', label: 'Accounting', icon: 'fa-book',       views: ['balancesheet', 'balanco', 'receivables'] },
+	{ key: 'accounting', label: 'Accounting', icon: 'fa-book',       views: ['balancesheet', 'balanco', 'receivables', 'payables'] },
 	{ key: 'settings',   label: 'Settings',   icon: 'fa-cog',        views: ['settings'] }
 ];
 
@@ -205,7 +206,7 @@ isoft_insights.App = class App {
 						<span class="ii-brand-logo"><i class="fa fa-line-chart"></i></span>
 						<span class="ii-brand-meta">
 							<span class="ii-brand-name">Isoft Insights</span>
-							<span class="ii-brand-tag">Sales Analytics</span>
+							<span class="ii-brand-tag">Sales &amp; Purchase</span>
 						</span>
 					</div>
 					<div class="ii-tabs">${tabs}</div>

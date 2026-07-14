@@ -950,23 +950,36 @@ def _prev_fiscal_year_range(start, end):
 
 
 def _account_credit_debit(account, start, end):
-	"""(credit - debit) over an account's whole sub-tree for the period, plus root_type."""
+	"""(credit - debit) over an account's whole sub-tree, plus root_type.
+
+	start=None gives the CUMULATIVE balance as of `end` (posting_date <= end) — the
+	correct basis for balance-sheet accounts, which carry their opening forward.
+	A concrete start gives only that period's movement — used for the P&L.
+	"""
 	acc = frappe.db.get_value(
 		"Account", account, ["lft", "rgt", "root_type", "company"], as_dict=True
 	)
 	if not acc:
 		return None, None
+	conds = [
+		"a.company = %(company)s",
+		"a.lft >= %(lft)s",
+		"a.rgt <= %(rgt)s",
+		"gle.is_cancelled = 0",
+		"gle.posting_date <= %(end)s",
+	]
+	params = {"company": acc.company, "lft": acc.lft, "rgt": acc.rgt, "end": end}
+	if start is not None:
+		conds.append("gle.posting_date >= %(start)s")
+		params["start"] = start
 	val = frappe.db.sql(
 		"""
 		SELECT COALESCE(SUM(gle.credit - gle.debit), 0)
 		FROM `tabGL Entry` gle
 		INNER JOIN `tabAccount` a ON a.name = gle.account
-		WHERE a.company = %(company)s
-			AND a.lft >= %(lft)s AND a.rgt <= %(rgt)s
-			AND gle.is_cancelled = 0
-			AND gle.posting_date BETWEEN %(start)s AND %(end)s
-		""",
-		{"company": acc.company, "lft": acc.lft, "rgt": acc.rgt, "start": start, "end": end},
+		WHERE {where}
+		""".format(where=" AND ".join(conds)),
+		params,
 	)[0][0]
 	return flt(val), acc.root_type
 
@@ -1280,15 +1293,20 @@ def _pl_net_result(start, end):
 		return 0.0
 
 
-def _bs_line_values(line, doc, start, end, missing):
-	"""Return (bruto, amort, liquido) for one line; None means 'not applicable'."""
+def _bs_line_values(line, doc, fy_start, end, missing):
+	"""Return (bruto, amort, liquido) for one line; None means 'not applicable'.
+
+	Balance-sheet account balances are CUMULATIVE as of `end` (start=None), so each
+	account carries its opening from prior years. Only the Resultados do Exercício
+	line uses the fiscal-year window (fy_start..end), being the year's net result.
+	"""
 	kind = line["kind"]
 
 	if kind == "asset":
 		acc = doc.get(line["field"])
 		if not acc:
 			return (0.0, 0.0, 0.0)
-		cd, _root = _account_credit_debit(acc, start, end)
+		cd, _root = _account_credit_debit(acc, None, end)
 		if cd is None:
 			missing.add(acc)
 			return (0.0, 0.0, 0.0)
@@ -1299,14 +1317,14 @@ def _bs_line_values(line, doc, start, end, missing):
 		bruto = amort = 0.0
 		gross = doc.get(line["field"])
 		if gross:
-			cd, _r = _account_credit_debit(gross, start, end)
+			cd, _r = _account_credit_debit(gross, None, end)
 			if cd is None:
 				missing.add(gross)
 			else:
 				bruto = -cd  # debit - credit (gross cost)
 		dep = doc.get(line.get("amort_field"))
 		if dep:
-			cd, _r = _account_credit_debit(dep, start, end)
+			cd, _r = _account_credit_debit(dep, None, end)
 			if cd is None:
 				missing.add(dep)
 			else:
@@ -1317,14 +1335,14 @@ def _bs_line_values(line, doc, start, end, missing):
 		acc = doc.get(line["field"])
 		if not acc:
 			return (None, None, 0.0)
-		cd, _root = _account_credit_debit(acc, start, end)
+		cd, _root = _account_credit_debit(acc, None, end)
 		if cd is None:
 			missing.add(acc)
 			return (None, None, 0.0)
 		return (None, None, cd)  # credit - debit
 
 	if kind == "pl_result":
-		return (None, None, _pl_net_result(start, end))
+		return (None, None, _pl_net_result(fy_start, end))
 
 	return (None, None, None)  # header / subheader
 
@@ -1632,4 +1650,134 @@ def drill_balance_sheet(row_code, account=None, fiscal_year=None, company=None):
 	else:  # asset / liab — first level shows the mapped account's children
 		accounts = _children_of(doc.get(line["field"]), company)
 
-	return {"rows": _drill_nodes(accounts, "magnitude", polarity, start, end, prev_start, prev_end)}
+	# Balance-sheet balances are cumulative (opening carried forward): start = None.
+	return {"rows": _drill_nodes(accounts, "magnitude", polarity, None, end, None, prev_end)}
+
+
+# --------------------------------------------------------------------------- #
+# Payables (supplier balances) — mirror of the receivables endpoints
+# --------------------------------------------------------------------------- #
+@frappe.whitelist()
+def get_supplier_balance(as_on_date=None, company=None, only_overdue=0):
+	"""Supplier payables with an aging breakdown (current / 1-30 / 31-60 / 61-90 / 90+).
+
+	Derived from submitted Purchase Invoices with an outstanding balance. Amounts
+	are converted to company currency via the invoice conversion rate.
+	"""
+	_assert_access()
+	as_on = getdate(as_on_date) if as_on_date else getdate(today())
+	currency = _company_currency(company)
+
+	conds = ["pi.docstatus = 1", "pi.outstanding_amount > 0"]
+	params = {"as_on": as_on}
+	if company:
+		conds.append("pi.company = %(company)s")
+		params["company"] = company
+	if cint(only_overdue):
+		conds.append("COALESCE(pi.due_date, pi.posting_date) < %(as_on)s")
+	where = " AND ".join(conds)
+
+	rows = frappe.db.sql(
+		"""
+		SELECT
+			supplier,
+			MAX(supplier_name) AS supplier_name,
+			COALESCE(SUM(out_base), 0) AS total_outstanding,
+			COALESCE(SUM(CASE WHEN days <= 0 THEN out_base ELSE 0 END), 0) AS current_amt,
+			COALESCE(SUM(CASE WHEN days BETWEEN 1 AND 30 THEN out_base ELSE 0 END), 0) AS b1_30,
+			COALESCE(SUM(CASE WHEN days BETWEEN 31 AND 60 THEN out_base ELSE 0 END), 0) AS b31_60,
+			COALESCE(SUM(CASE WHEN days BETWEEN 61 AND 90 THEN out_base ELSE 0 END), 0) AS b61_90,
+			COALESCE(SUM(CASE WHEN days > 90 THEN out_base ELSE 0 END), 0) AS b90_plus,
+			COUNT(*) AS invoice_count
+		FROM (
+			SELECT
+				pi.supplier AS supplier,
+				COALESCE(pi.supplier_name, pi.supplier) AS supplier_name,
+				pi.outstanding_amount * COALESCE(pi.conversion_rate, 1) AS out_base,
+				DATEDIFF(%(as_on)s, COALESCE(pi.due_date, pi.posting_date)) AS days
+			FROM `tabPurchase Invoice` pi
+			WHERE {where}
+		) t
+		GROUP BY supplier
+		ORDER BY total_outstanding DESC
+		""".format(where=where),
+		params,
+		as_dict=True,
+	)
+
+	# Real supplier balance from the GL (credit - debit for a payable).
+	suppliers = [r.supplier for r in rows if r.supplier]
+	balances = {}
+	if suppliers:
+		gl_conds = [
+			"gle.party_type = 'Supplier'",
+			"gle.is_cancelled = 0",
+			"gle.posting_date <= %(as_on)s",
+			"gle.party IN %(suppliers)s",
+		]
+		gl_params = {"as_on": as_on, "suppliers": tuple(suppliers)}
+		if company:
+			gl_conds.append("gle.company = %(company)s")
+			gl_params["company"] = company
+		gl_rows = frappe.db.sql(
+			"""
+			SELECT gle.party AS supplier, COALESCE(SUM(gle.credit - gle.debit), 0) AS balance
+			FROM `tabGL Entry` gle
+			WHERE {gl_where}
+			GROUP BY gle.party
+			""".format(gl_where=" AND ".join(gl_conds)),
+			gl_params,
+			as_dict=True,
+		)
+		balances = {b.supplier: flt(b.balance) for b in gl_rows}
+
+	for r in rows:
+		r["balance"] = balances.get(r.supplier, 0.0)
+
+	totals = {
+		"total_outstanding": sum(flt(r.total_outstanding) for r in rows),
+		"balance": sum(flt(r.balance) for r in rows),
+		"current_amt": sum(flt(r.current_amt) for r in rows),
+		"b1_30": sum(flt(r.b1_30) for r in rows),
+		"b31_60": sum(flt(r.b31_60) for r in rows),
+		"b61_90": sum(flt(r.b61_90) for r in rows),
+		"b90_plus": sum(flt(r.b90_plus) for r in rows),
+	}
+
+	return {"currency": currency, "as_on": str(as_on), "rows": rows, "totals": totals}
+
+
+@frappe.whitelist()
+def get_supplier_open_invoices(supplier, as_on_date=None, company=None):
+	"""Open (outstanding) purchase invoices for one supplier - payables drill-down."""
+	_assert_access()
+	as_on = getdate(as_on_date) if as_on_date else getdate(today())
+	currency = _company_currency(company)
+
+	conds = ["pi.docstatus = 1", "pi.outstanding_amount > 0", "pi.supplier = %(supplier)s"]
+	params = {"supplier": supplier, "as_on": as_on}
+	if company:
+		conds.append("pi.company = %(company)s")
+		params["company"] = company
+	where = " AND ".join(conds)
+
+	rows = frappe.db.sql(
+		"""
+		SELECT
+			pi.name AS invoice,
+			pi.bill_no AS bill_no,
+			pi.posting_date AS posting_date,
+			pi.due_date AS due_date,
+			pi.status AS status,
+			pi.grand_total * COALESCE(pi.conversion_rate, 1) AS grand_total,
+			pi.outstanding_amount * COALESCE(pi.conversion_rate, 1) AS outstanding,
+			DATEDIFF(%(as_on)s, COALESCE(pi.due_date, pi.posting_date)) AS days_overdue
+		FROM `tabPurchase Invoice` pi
+		WHERE {where}
+		ORDER BY pi.posting_date
+		""".format(where=where),
+		params,
+		as_dict=True,
+	)
+
+	return {"currency": currency, "rows": rows}

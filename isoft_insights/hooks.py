@@ -3,7 +3,7 @@ from . import __version__ as app_version
 app_name = "isoft_insights"
 app_title = "Isoft Insights"
 app_publisher = "Isoft"
-app_description = "Sales analytics and insights for ERPNext"
+app_description = "Sales & purchase analytics and insights for ERPNext"
 app_icon = "fa fa-line-chart"
 app_color = "blue"
 app_email = "abbasschokor225@gmail.com"
