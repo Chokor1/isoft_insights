@@ -20,6 +20,7 @@ isoft_insights.THEMES = {
 // period: whether the global period/date filter applies to this view.
 isoft_insights.VIEWS = [
 	{ key: 'overview',    label: 'Overview',    icon: 'fa-tachometer',  file: 'overview',    period: true },
+	{ key: 'salesreport', label: 'Sales Report', icon: 'fa-shopping-cart', file: 'salesreport', period: false },
 	{ key: 'customers',   label: 'Customers',   icon: 'fa-users',       file: 'customers',   period: true },
 	{ key: 'items',       label: 'Products',    icon: 'fa-cube',        file: 'items',       period: true },
 	{ key: 'matrix',      label: 'Matrix',      icon: 'fa-th',          file: 'matrix',      period: false },
@@ -28,14 +29,15 @@ isoft_insights.VIEWS = [
 	{ key: 'payables',    label: 'Payables',    icon: 'fa-money',       file: 'payables',    period: false },
 	{ key: 'balancesheet', label: 'Demonstração de Resultados', icon: 'fa-file-text-o', file: 'balancesheet', period: false },
 	{ key: 'balanco',     label: 'Balanço',     icon: 'fa-balance-scale', file: 'balanco',    period: false },
+	{ key: 'cashflow',    label: 'Fluxos de Caixa', icon: 'fa-exchange', file: 'cashflow',   period: false },
 	{ key: 'settings',    label: 'Settings',    icon: 'fa-cog',         file: 'settings',    period: false }
 ];
 
 // Navbar groups: each group is a dropdown of views. Single-view groups act as a
 // plain button. `key` must be unique; `views` reference isoft_insights.VIEWS keys.
 isoft_insights.GROUPS = [
-	{ key: 'sales',      label: 'Sales',      icon: 'fa-line-chart', views: ['overview', 'customers', 'items', 'matrix', 'salesteam'] },
-	{ key: 'accounting', label: 'Accounting', icon: 'fa-book',       views: ['balancesheet', 'balanco', 'receivables', 'payables'] },
+	{ key: 'sales',      label: 'Sales',      icon: 'fa-line-chart', views: ['overview', 'salesreport', 'customers', 'items', 'matrix', 'salesteam'] },
+	{ key: 'accounting', label: 'Accounting', icon: 'fa-book',       views: ['balancesheet', 'balanco', 'cashflow', 'receivables', 'payables'] },
 	{ key: 'settings',   label: 'Settings',   icon: 'fa-cog',        views: ['settings'] }
 ];
 
@@ -131,6 +133,8 @@ isoft_insights.App = class App {
 
 	money(value) {
 		try {
+			// "Hide Price Currency" setting -> plain number, no symbol.
+			if (this.state.hide_currency) return format_number(flt(value), null, 2);
 			return format_currency(flt(value), this.state.currency);
 		} catch (e) {
 			return (flt(value)).toFixed(2);
@@ -152,6 +156,7 @@ isoft_insights.App = class App {
 			this.state.period = s.default_period || 'This Year';
 			this.state.company = s.default_company || null;
 			this.state.currency = s.default_currency || 'USD';
+			this.state.hide_currency = cint(s.hide_price_currency) ? 1 : 0;
 			// Accent is fixed; light/dark follows the Frappe desk theme via CSS.
 			this.apply_theme('Blue');
 
@@ -365,13 +370,26 @@ isoft_insights.App = class App {
 	}
 
 	populate_company(s) {
+		const me = this;
+		const esc = frappe.utils.escape_html;
 		const $sel = this.page.main.find('#ii-company');
-		$sel.html('<option value="">All Companies</option>');
+		$sel.html('');
 		this.api('get_companies').then((companies) => {
-			(companies || []).forEach((c) => {
-				$sel.append(`<option value="${frappe.utils.escape_html(c)}">${frappe.utils.escape_html(c)}</option>`);
+			companies = companies || [];
+			companies.forEach((c) => {
+				$sel.append(`<option value="${esc(c)}">${esc(c)}</option>`);
 			});
-			if (this.state.company) $sel.val(this.state.company);
+			// No "All Companies" option: always keep a specific company selected.
+			const had_company = !!me.state.company;
+			if (!me.state.company && companies.length) {
+				me.state.company = companies[0];
+			}
+			if (me.state.company) $sel.val(me.state.company);
+			// If we had to default the company after the initial view already
+			// rendered (settings had no default company), reload so data matches.
+			if (!had_company && me.state.company && me.ready) {
+				me.reload();
+			}
 		});
 	}
 
@@ -617,6 +635,8 @@ isoft_insights.App = class App {
 		.ii-chart-wrap { width: 100%; }
 		.ii-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
 		.ii-field-label { font-size: 12px; font-weight: 600; color: var(--ii-muted); margin-bottom: 4px; display: block; }
+		.ii-chk { display: flex; align-items: center; gap: 8px; font-weight: 500; font-size: 13px; margin: 0; padding-top: 6px; cursor: pointer; }
+		.ii-chk input { margin: 0; }
 		.ii-role-grid { display: flex; flex-wrap: wrap; gap: 8px; max-height: 230px; overflow-y: auto; padding: 4px; }
 		.ii-role-chip { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: 500; font-size: 12.5px;
 			border: 1px solid var(--ii-border); border-radius: 20px; padding: 5px 12px; cursor: pointer; transition: all .15s ease; background: var(--ii-card); }
@@ -641,6 +661,55 @@ isoft_insights.App = class App {
 		[data-theme="dark"] .ii-card { box-shadow: 0 4px 14px rgba(0,0,0,0.30); }
 		[data-theme="dark"] .ii-bar { background: var(--ii-card); box-shadow: 0 6px 22px rgba(0,0,0,0.45); }
 		[data-theme="dark"] .ii-tab { background: var(--ii-card); }
+
+		/* ---- Shared financial-statement styles (DR / Balanço / Fluxos de Caixa) ----
+		   Defined here in the always-loaded shell so every statement looks identical
+		   no matter which one is opened first. Components add only their specifics. */
+		.bs-card { padding: 0; overflow: hidden; }
+		.bs-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+			padding: 18px 20px; border-bottom: 1px solid var(--ii-border); flex-wrap: wrap; }
+		.bs-title { font-size: 16px; font-weight: 800; }
+		.bs-sub { font-size: 12px; color: var(--ii-muted); margin-top: 3px; text-transform: uppercase; letter-spacing: .4px; }
+		.bs-badge { font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 20px; white-space: nowrap; }
+		.bs-badge.ok { background: #dcfce7; color: #166534; }
+		.bs-badge.bad { background: #fee2e2; color: #991b1b; }
+		.bs-warn { margin: 12px 20px 0; padding: 9px 12px; border-radius: 8px; font-size: 12.5px;
+			background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+		.bs-warn i { margin-right: 6px; }
+		.bs-table-wrap { overflow-x: auto; padding: 8px 4px 12px; }
+		.bs-table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 560px; }
+		.bs-table th { text-align: left; color: var(--ii-text); font-weight: 700; font-size: 12.5px;
+			padding: 8px 14px; border-bottom: 1px solid var(--ii-border); }
+		.bs-table thead tr:first-child th { border-bottom: none; padding-bottom: 2px; }
+		.bs-table tr.bs-subhead th { font-weight: 500; color: var(--ii-muted); font-size: 11.5px; padding-top: 0;
+			border-bottom: 2px solid var(--ii-border); }
+		.bs-table th.bs-num, .bs-table td.bs-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+		.bs-table td { padding: 9px 14px; border-bottom: 1px solid var(--ii-border); }
+		.bs-table td.bs-notas, .bs-table th.bs-notas { width: 64px; color: var(--ii-muted); font-size: 12px; }
+		.bs-table td.bs-label { color: var(--ii-text); }
+		.bs-table td.bs-prev { color: var(--ii-muted); }
+		.bs-table tr.bs-total td { font-weight: 800; background: var(--ii-bg); border-top: 1px solid var(--ii-border); }
+		.bs-table tr.bs-header td { font-weight: 700; text-transform: uppercase; font-size: 11.5px; letter-spacing: .5px;
+			color: var(--ii-primary); background: var(--ii-bg); padding-top: 12px; }
+		.bs-table td.bs-neg { color: #dc2626; }
+		.bs-table tbody tr:hover td { background: var(--ii-bg); }
+		.bs-sublabel { font-weight: 500; color: var(--ii-muted); font-size: 10px; }
+		/* variation cell */
+		.v-cell { font-weight: 700; }
+		.v-cell .v-arrow { font-size: 10px; margin-right: 1px; }
+		.v-cell .v-pct-main { font-weight: 700; font-size: 13.5px; }
+		.v-cell .v-amt { font-weight: 500; font-size: 11px; opacity: .75; margin-left: 5px; }
+		.v-good { color: #059669; } .v-bad { color: #dc2626; } .v-flat { color: var(--ii-muted); }
+		/* drill-down */
+		.bs-table tr.bs-dr { cursor: pointer; }
+		.bs-table tr.bs-dr:hover td { background: var(--ii-bg); }
+		.bs-caret { color: var(--ii-muted); font-size: 11px; margin-right: 7px; display: inline-block; transition: transform .15s ease; }
+		.bs-caret.down { transform: rotate(90deg); color: var(--ii-primary); }
+		.bs-caret-space { display: inline-block; width: 11px; margin-right: 7px; }
+		.bs-table tr.bs-drill-child td { background: rgba(37,99,235,0.035); font-size: 12.5px; }
+		.bs-table tr.bs-drill-child td.bs-label { color: var(--ii-text); }
+		[data-theme="dark"] .bs-table tr.bs-drill-child td { background: rgba(59,130,246,0.07); }
+		@media print { .ii-bar, .ii-rowfilters { display: none !important; } .bs-card { box-shadow: none; border: none; } }
 		</style>`;
 		$('head').append(css);
 	}
@@ -676,6 +745,48 @@ isoft_insights.REPORT_SETTINGS = {
 				['acc_imposto_rend_extra', 'Imposto sobre o rendimento (extraordinário)'],
 				['acc_extra_proveitos', 'Resultados extraordinários — Proveitos'],
 				['acc_extra_custos', 'Resultados extraordinários — Custos'] ] }
+		]
+	},
+	cf: {
+		title: 'Fluxos de Caixa — Contas',
+		report: 'cf',
+		getter: 'get_cash_flow_settings',
+		saver: 'save_cash_flow_settings',
+		sections: [
+			{ label: 'Atividades Operacionais (método directo)', fields: [
+				['cf_receb_clientes', 'Recebimentos de clientes'],
+				['cf_pag_fornecedores', 'Pagamentos a fornecedores'],
+				['cf_pag_pessoal', 'Pagamentos ao pessoal'],
+				['cf_imposto_rendimento', 'Imposto sobre o rendimento (pag./receb.)'],
+				['cf_outro_receb_pag', 'Outro recebimento/pagamento'] ] },
+			{ label: 'Investimento — Pagamentos respeitantes a', fields: [
+				['cf_inv_pag_tangiveis', 'Ativos fixos tangíveis'],
+				['cf_inv_pag_intangiveis', 'Ativos intangíveis'],
+				['cf_inv_pag_financeiros', 'Investimentos financeiros'],
+				['cf_inv_pag_outros', 'Outros ativos'] ] },
+			{ label: 'Investimento — Recebimentos provenientes de', fields: [
+				['cf_inv_receb_tangiveis', 'Ativos fixos tangíveis'],
+				['cf_inv_receb_intangiveis', 'Ativos intangíveis'],
+				['cf_inv_receb_financeiros', 'Investimentos financeiros'],
+				['cf_inv_receb_outros', 'Outros ativos'],
+				['cf_inv_subsidios', 'Subsídios ao investimento'],
+				['cf_inv_juros', 'Juros e rendimentos similares'],
+				['cf_inv_dividendos', 'Dividendos'] ] },
+			{ label: 'Financiamento — Recebimentos provenientes de', fields: [
+				['cf_fin_receb_financiamentos', 'Financiamentos obtidos'],
+				['cf_fin_receb_capital', 'Realizações de capital e outros instrumentos'],
+				['cf_fin_receb_cobertura', 'Cobertura de prejuízos'],
+				['cf_fin_receb_doacoes', 'Doações'],
+				['cf_fin_receb_outras', 'Outras operações de financiamento'] ] },
+			{ label: 'Financiamento — Pagamentos respeitantes a', fields: [
+				['cf_fin_pag_financiamentos', 'Financiamentos obtidos'],
+				['cf_fin_pag_juros', 'Juros e gastos similares'],
+				['cf_fin_pag_dividendos', 'Dividendos'],
+				['cf_fin_pag_reducoes', 'Reduções de capital e outros instrumentos'],
+				['cf_fin_pag_outras', 'Outras operações de financiamento'] ] },
+			{ label: 'Caixa e Equivalentes', fields: [
+				['cf_caixa', 'Caixa e seus equivalentes (saldo inicial/final)'],
+				['cf_efeito_cambio', 'Efeito das diferenças de câmbio'] ] }
 		]
 	},
 	bs: {
@@ -886,5 +997,82 @@ isoft_insights.printStatement = function (kind, data) {
 	w.document.write(html);
 	w.document.close();
 	w.focus();
+	setTimeout(() => { try { w.print(); } catch (e) { /* user can print manually */ } }, 350);
+};
+
+// --------------------------------------------------------------------------- //
+// Shared: Excel export (exports exactly the rows currently displayed)
+// --------------------------------------------------------------------------- //
+isoft_insights.exportXlsx = function (title, columns, rows) {
+	if (!rows || !rows.length) { frappe.msgprint(__('Nothing to export.')); return; }
+	frappe.call({
+		method: isoft_insights.METHOD + 'export_table_xlsx',
+		args: { title: title, columns: JSON.stringify(columns), rows: JSON.stringify(rows) },
+		freeze: true, freeze_message: __('Building Excel…')
+	}).then((r) => {
+		const res = r.message;
+		if (!res || !res.content) { frappe.msgprint(__('Could not build the file.')); return; }
+		const bin = atob(res.content);
+		const arr = new Uint8Array(bin.length);
+		for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+		const blob = new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+		const a = document.createElement('a');
+		a.href = URL.createObjectURL(blob);
+		a.download = res.filename || 'export.xlsx';
+		document.body.appendChild(a);
+		a.click();
+		setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 200);
+	}).catch(() => frappe.msgprint(__('Could not export.')));
+};
+
+// --------------------------------------------------------------------------- //
+// Shared: clean printable table (Print -> Save as PDF)
+// --------------------------------------------------------------------------- //
+// opts: { title, company, meta: [..lines..], columns: [{label, num}], rows: [[cell,..]], landscape }
+isoft_insights.printTable = function (opts) {
+	opts = opts || {};
+	const esc = (s) => frappe.utils.escape_html(s == null ? '' : String(s));
+	const cols = opts.columns || [];
+	const rows = opts.rows || [];
+	if (!rows.length) { frappe.msgprint(__('Nothing to print.')); return; }
+
+	const head = cols.map((c) => `<th class="${c.num ? 'num' : ''}">${esc(c.label)}</th>`).join('');
+	const body = rows.map((r) => `<tr>${r.map((cell, i) =>
+		`<td class="${cols[i] && cols[i].num ? 'num' : ''}">${esc(cell)}</td>`).join('')}</tr>`).join('');
+
+	const now = new Date();
+	const stamp = now.toLocaleDateString() + ' ' + now.toLocaleTimeString();
+	const metaLines = (opts.meta || []).map((m) => esc(m)).join('<br>');
+
+	const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(opts.title)}</title>
+		<style>
+			* { box-sizing: border-box; }
+			body { font-family: 'Inter', Arial, sans-serif; color:#1f2937; margin:24px 28px; font-size:11px; }
+			.doc-head { display:flex; justify-content:space-between; align-items:flex-end; border-bottom:2px solid #1f2937; padding-bottom:10px; }
+			.company { font-size:17px; font-weight:800; }
+			.title { font-size:13px; font-weight:700; margin-top:2px; }
+			.meta { text-align:right; font-size:10px; color:#6b7280; line-height:1.5; }
+			table { width:100%; border-collapse:collapse; margin-top:12px; }
+			th, td { padding:4px 7px; border-bottom:1px solid #e5e7eb; }
+			thead th { border-bottom:1.5px solid #1f2937; text-align:left; font-size:10px; background:#f3f4f6; }
+			th.num, td.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+			tbody tr:nth-child(even) td { background:#fafafa; }
+			.foot { margin-top:14px; font-size:9px; color:#9ca3af; text-align:right; }
+			thead { display:table-header-group; }
+			tr { page-break-inside:avoid; }
+			@media print { body { margin:10mm; } @page { size:A4 ${opts.landscape ? 'landscape' : 'portrait'}; } }
+		</style></head>
+		<body>
+			<div class="doc-head">
+				<div><div class="company">${esc(opts.company || '')}</div><div class="title">${esc(opts.title || '')}</div></div>
+				<div class="meta">${metaLines}${metaLines ? '<br>' : ''}Emitido: ${esc(stamp)}</div>
+			</div>
+			<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+			<div class="foot">Isoft Insights · ${esc(opts.title || '')} · ${rows.length} linhas</div>
+		</body></html>`;
+
+	const w = window.open('', '_blank');
+	if (!w) { frappe.msgprint(__('Please allow pop-ups to print.')); return; }
+	w.document.open(); w.document.write(html); w.document.close(); w.focus();
 	setTimeout(() => { try { w.print(); } catch (e) { /* user can print manually */ } }, 350);
 };

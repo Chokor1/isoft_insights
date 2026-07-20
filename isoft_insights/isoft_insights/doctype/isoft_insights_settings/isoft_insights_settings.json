@@ -11,6 +11,7 @@
   "default_period",
   "column_break_general",
   "top_n",
+  "hide_price_currency",
   "access_section",
   "access_mode",
   "allowed_roles",
@@ -53,6 +54,13 @@
    "fieldtype": "Int",
    "label": "Top N (customers / items)",
    "description": "How many rows to show in 'top' lists."
+  },
+  {
+   "default": "0",
+   "fieldname": "hide_price_currency",
+   "fieldtype": "Check",
+   "label": "Hide Price Currency",
+   "description": "When enabled, the currency symbol is hidden next to prices and values in Isoft Insights views and exports."
   },
   {
    "fieldname": "access_section",

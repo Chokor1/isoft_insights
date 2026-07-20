@@ -44,6 +44,7 @@ def get_insights_settings():
 		"default_currency": currency,
 		"default_period": s.default_period or "This Year",
 		"top_n": cint(s.top_n) or 10,
+		"hide_price_currency": cint(getattr(s, "hide_price_currency", 0)),
 		"access_mode": s.access_mode or "By Role",
 		"allowed_roles": _lines(s.allowed_roles) or ["Sales Manager"],
 		"allowed_users": _lines(s.allowed_users),
@@ -763,6 +764,7 @@ def save_insights_settings(payload):
 
 	allowed_fields = {
 		"default_company", "default_currency", "default_period", "top_n", "access_mode",
+		"hide_price_currency",
 	}
 	for f in allowed_fields:
 		if f in payload:
@@ -1781,3 +1783,526 @@ def get_supplier_open_invoices(supplier, as_on_date=None, company=None):
 	)
 
 	return {"currency": currency, "rows": rows}
+
+
+# --------------------------------------------------------------------------- #
+# Sales activity report — by transaction (expand to items) or by item (expand to
+# transactions). Filters: date range, branch, customer, customer group.
+# --------------------------------------------------------------------------- #
+def _sales_activity_filters(from_date, to_date, company, branch, customer, customer_group):
+	conds = ["si.docstatus = 1"]
+	params = {}
+	if from_date:
+		conds.append("si.posting_date >= %(from_date)s")
+		params["from_date"] = getdate(from_date)
+	if to_date:
+		conds.append("si.posting_date <= %(to_date)s")
+		params["to_date"] = getdate(to_date)
+	if company:
+		conds.append("si.company = %(company)s")
+		params["company"] = company
+	if branch:
+		conds.append("si.branch = %(branch)s")
+		params["branch"] = branch
+	if customer:
+		conds.append("si.customer = %(customer)s")
+		params["customer"] = customer
+	if customer_group:
+		conds.append("si.customer_group = %(customer_group)s")
+		params["customer_group"] = customer_group
+	return conds, params
+
+
+@frappe.whitelist()
+def get_sales_branches():
+	"""Branches actually used on Sales Invoices (for the filter)."""
+	_assert_access()
+	rows = frappe.db.sql(
+		"""
+		SELECT DISTINCT branch FROM `tabSales Invoice`
+		WHERE docstatus = 1 AND IFNULL(branch, '') <> ''
+		ORDER BY branch
+		"""
+	)
+	return [r[0] for r in rows]
+
+
+@frappe.whitelist()
+def get_customer_groups():
+	"""Customer groups for the filter."""
+	_assert_access()
+	return frappe.get_all("Customer Group", filters={"is_group": 0}, order_by="name", pluck="name")
+
+
+@frappe.whitelist()
+def get_sales_activity(from_date=None, to_date=None, company=None, branch=None,
+                       customer=None, customer_group=None, group_by=None):
+	"""Sales rows grouped by transaction (invoice) or by item."""
+	_assert_access()
+	group_by = (group_by or "transaction").lower()
+	currency = _company_currency(company)
+	conds, params = _sales_activity_filters(from_date, to_date, company, branch, customer, customer_group)
+	where = " AND ".join(conds)
+
+	if group_by == "item":
+		rows = frappe.db.sql(
+			"""
+			SELECT
+				sii.item_code AS item_code,
+				MAX(COALESCE(sii.item_name, sii.item_code)) AS item_name,
+				COALESCE(NULLIF(sii.item_group, ''), 'Not Set') AS item_group,
+				COALESCE(SUM(sii.qty), 0) AS qty,
+				COALESCE(SUM(sii.base_net_amount), 0) AS net_amount,
+				COUNT(DISTINCT si.name) AS invoice_count,
+				COUNT(DISTINCT si.customer) AS customer_count,
+				GROUP_CONCAT(DISTINCT COALESCE(si.customer_name, si.customer) SEPARATOR ', ') AS customers,
+				MIN(si.posting_date) AS first_date,
+				MAX(si.posting_date) AS last_date
+			FROM `tabSales Invoice Item` sii
+			INNER JOIN `tabSales Invoice` si ON si.name = sii.parent
+			WHERE {where}
+			GROUP BY sii.item_code, COALESCE(NULLIF(sii.item_group, ''), 'Not Set')
+			ORDER BY net_amount DESC
+			""".format(where=where),
+			params,
+			as_dict=True,
+		)
+	else:
+		rows = frappe.db.sql(
+			"""
+			SELECT
+				si.name AS invoice,
+				si.posting_date AS posting_date,
+				si.customer AS customer,
+				COALESCE(si.customer_name, si.customer) AS customer_name,
+				COALESCE(NULLIF(si.customer_group, ''), 'Not Set') AS customer_group,
+				COALESCE(NULLIF(si.branch, ''), 'Not Set') AS branch,
+				si.status AS status,
+				si.is_return AS is_return,
+				COALESCE(SUM(sii.qty), 0) AS qty,
+				COALESCE(SUM(sii.base_net_amount), 0) AS net_amount,
+				MAX(si.base_grand_total) AS grand_total,
+				COUNT(sii.name) AS item_count
+			FROM `tabSales Invoice` si
+			INNER JOIN `tabSales Invoice Item` sii ON sii.parent = si.name
+			WHERE {where}
+			GROUP BY si.name
+			ORDER BY si.posting_date DESC, si.name DESC
+			""".format(where=where),
+			params,
+			as_dict=True,
+		)
+
+	totals = {
+		"qty": sum(flt(r.get("qty")) for r in rows),
+		"net_amount": sum(flt(r.get("net_amount")) for r in rows),
+		"grand_total": sum(flt(r.get("grand_total")) for r in rows) if group_by != "item" else None,
+		"count": len(rows),
+	}
+	return {"currency": currency, "group_by": group_by, "rows": rows, "totals": totals}
+
+
+@frappe.whitelist()
+def get_sales_activity_detail(group_by, key, from_date=None, to_date=None, company=None,
+                              branch=None, customer=None, customer_group=None):
+	"""Drill-down: items of an invoice, or transactions for an item."""
+	_assert_access()
+	group_by = (group_by or "transaction").lower()
+	currency = _company_currency(company)
+
+	if group_by == "item":
+		conds, params = _sales_activity_filters(from_date, to_date, company, branch, customer, customer_group)
+		conds.append("sii.item_code = %(item_code)s")
+		params["item_code"] = key
+		rows = frappe.db.sql(
+			"""
+			SELECT
+				si.name AS invoice,
+				si.posting_date AS posting_date,
+				COALESCE(si.customer_name, si.customer) AS customer_name,
+				COALESCE(NULLIF(si.branch, ''), 'Not Set') AS branch,
+				sii.qty AS qty,
+				sii.base_net_rate AS rate,
+				sii.base_net_amount AS net_amount
+			FROM `tabSales Invoice Item` sii
+			INNER JOIN `tabSales Invoice` si ON si.name = sii.parent
+			WHERE {where}
+			ORDER BY si.posting_date DESC, si.name DESC
+			""".format(where=" AND ".join(conds)),
+			params,
+			as_dict=True,
+		)
+	else:
+		rows = frappe.db.sql(
+			"""
+			SELECT
+				sii.item_code AS item_code,
+				COALESCE(sii.item_name, sii.item_code) AS item_name,
+				COALESCE(NULLIF(sii.item_group, ''), 'Not Set') AS item_group,
+				sii.qty AS qty,
+				sii.base_net_rate AS rate,
+				sii.base_net_amount AS net_amount,
+				sii.warehouse AS warehouse
+			FROM `tabSales Invoice Item` sii
+			WHERE sii.parent = %(invoice)s
+			ORDER BY sii.idx
+			""",
+			{"invoice": key},
+			as_dict=True,
+		)
+
+	return {"currency": currency, "group_by": group_by, "rows": rows}
+
+
+# --------------------------------------------------------------------------- #
+# Generic Excel export — takes the rows already displayed (so the user's filters
+# and sorting are preserved) and returns a base64 .xlsx for the browser to save.
+# --------------------------------------------------------------------------- #
+@frappe.whitelist()
+def export_table_xlsx(title, columns, rows):
+	"""Build an .xlsx from a header list + row matrix. Returns {filename, content(b64)}."""
+	_assert_access()
+	import base64
+	from frappe.utils.xlsxutils import make_xlsx
+
+	if isinstance(columns, str):
+		columns = frappe.parse_json(columns)
+	if isinstance(rows, str):
+		rows = frappe.parse_json(rows)
+	columns = columns or []
+	rows = rows or []
+
+	data = [[str(c) for c in columns]] + [list(r) for r in rows]
+	sheet = (title or "Export")[:31] or "Export"
+	xlsx = make_xlsx(data, sheet)
+
+	safe = "".join(ch for ch in (title or "export") if ch.isalnum() or ch in " -_").strip() or "export"
+	return {
+		"filename": "%s.xlsx" % safe.replace(" ", "_"),
+		"content": base64.b64encode(xlsx.getvalue()).decode("utf-8"),
+	}
+
+
+# --------------------------------------------------------------------------- #
+# Angola cash flow — Demonstração de Fluxos de Caixa (direct method)
+# --------------------------------------------------------------------------- #
+#
+# Same pattern as the income statement / balance sheet: the structure, labels,
+# footnotes and formulas are fixed here in code; only the account per line is
+# configured (searchable Link fields on the settings doctype).
+#
+# Line kinds:
+#   flow        : movement of the mapped account over the fiscal year (natural
+#                 positive by root type). Payment lines are subtracted by formula.
+#   cash_open   : cumulative cash balance the day BEFORE the year starts.
+#   cash_close  : cumulative cash balance at the year end.
+#   formula     : arithmetic over other rows.
+#   header / subheader : section titles only.
+
+ANGOLA_CF_DOCTYPE = "Isoft Angola Cash Flow Settings"
+ANGOLA_CF_TITLE = "Demonstração de Fluxos de Caixa"
+
+ANGOLA_CF = [
+	{"code": "h_op", "label": "Fluxo de caixa das atividades operacionais – método directo", "kind": "header"},
+	{"code": "receb_clientes", "label": "Recebimentos de clientes", "notas": "45", "kind": "flow", "field": "cf_receb_clientes"},
+	{"code": "pag_fornecedores", "label": "Pagamentos a fornecedores", "notas": "", "kind": "flow", "field": "cf_pag_fornecedores"},
+	{"code": "pag_pessoal", "label": "Pagamentos ao pessoal", "notas": "", "kind": "flow", "field": "cf_pag_pessoal"},
+	{"code": "caixa_operacoes", "label": "Caixa gerada pelas operações", "notas": "", "kind": "formula",
+	 "expr": "receb_clientes - pag_fornecedores - pag_pessoal", "bold": 1},
+	{"code": "imposto_rendimento", "label": "Pagamentos/recebimentos de imposto sobre o rendimento", "notas": "", "kind": "flow", "field": "cf_imposto_rendimento"},
+	{"code": "outro_receb_pag", "label": "Outro recebimento/pagamento", "notas": "", "kind": "flow", "field": "cf_outro_receb_pag"},
+	{"code": "fluxo_operacional", "label": "Fluxos de caixa das atividades operacionais", "notas": "", "kind": "formula",
+	 "expr": "caixa_operacoes + imposto_rendimento + outro_receb_pag", "bold": 1, "strong": 1},
+
+	{"code": "h_inv", "label": "Fluxos de caixa das atividades de investimento", "notas": "46", "kind": "header"},
+	{"code": "h_inv_pag", "label": "Pagamentos respeitantes a:", "kind": "subheader"},
+	{"code": "inv_pag_tangiveis", "label": "Ativos fixos tangíveis", "notas": "", "kind": "flow", "field": "cf_inv_pag_tangiveis", "indent": 1},
+	{"code": "inv_pag_intangiveis", "label": "Ativos intangíveis", "notas": "", "kind": "flow", "field": "cf_inv_pag_intangiveis", "indent": 1},
+	{"code": "inv_pag_financeiros", "label": "Investimentos financeiros", "notas": "", "kind": "flow", "field": "cf_inv_pag_financeiros", "indent": 1},
+	{"code": "inv_pag_outros", "label": "Outros ativos", "notas": "", "kind": "flow", "field": "cf_inv_pag_outros", "indent": 1},
+	{"code": "h_inv_receb", "label": "Recebimentos provenientes de:", "kind": "subheader"},
+	{"code": "inv_receb_tangiveis", "label": "Ativos fixos tangíveis", "notas": "", "kind": "flow", "field": "cf_inv_receb_tangiveis", "indent": 1},
+	{"code": "inv_receb_intangiveis", "label": "Ativos intangíveis", "notas": "", "kind": "flow", "field": "cf_inv_receb_intangiveis", "indent": 1},
+	{"code": "inv_receb_financeiros", "label": "Investimentos financeiros", "notas": "", "kind": "flow", "field": "cf_inv_receb_financeiros", "indent": 1},
+	{"code": "inv_receb_outros", "label": "Outros ativos", "notas": "", "kind": "flow", "field": "cf_inv_receb_outros", "indent": 1},
+	{"code": "inv_subsidios", "label": "Subsídios ao investimento", "notas": "", "kind": "flow", "field": "cf_inv_subsidios", "indent": 1},
+	{"code": "inv_juros", "label": "Juros e rendimentos similares", "notas": "", "kind": "flow", "field": "cf_inv_juros", "indent": 1},
+	{"code": "inv_dividendos", "label": "Dividendos", "notas": "", "kind": "flow", "field": "cf_inv_dividendos", "indent": 1},
+	{"code": "fluxo_investimento", "label": "Fluxos de caixa das atividades de investimento", "notas": "", "kind": "formula",
+	 "expr": "(inv_receb_tangiveis + inv_receb_intangiveis + inv_receb_financeiros + inv_receb_outros + inv_subsidios + inv_juros + inv_dividendos)"
+	         " - (inv_pag_tangiveis + inv_pag_intangiveis + inv_pag_financeiros + inv_pag_outros)", "bold": 1, "strong": 1},
+
+	{"code": "h_fin", "label": "Fluxos de caixa das atividades de financiamento", "kind": "header"},
+	{"code": "h_fin_receb", "label": "Recebimentos provenientes de:", "kind": "subheader"},
+	{"code": "fin_receb_financiamentos", "label": "Financiamentos obtidos", "notas": "", "kind": "flow", "field": "cf_fin_receb_financiamentos", "indent": 1},
+	{"code": "fin_receb_capital", "label": "Realizações de capital e de outros instrumentos de capital próprio", "notas": "", "kind": "flow", "field": "cf_fin_receb_capital", "indent": 1},
+	{"code": "fin_receb_cobertura", "label": "Cobertura de prejuízos", "notas": "", "kind": "flow", "field": "cf_fin_receb_cobertura", "indent": 1},
+	{"code": "fin_receb_doacoes", "label": "Doações", "notas": "", "kind": "flow", "field": "cf_fin_receb_doacoes", "indent": 1},
+	{"code": "fin_receb_outras", "label": "Outras operações de financiamento", "notas": "", "kind": "flow", "field": "cf_fin_receb_outras", "indent": 1},
+	{"code": "h_fin_pag", "label": "Pagamentos respeitantes a:", "kind": "subheader"},
+	{"code": "fin_pag_financiamentos", "label": "Financiamentos obtidos", "notas": "", "kind": "flow", "field": "cf_fin_pag_financiamentos", "indent": 1},
+	{"code": "fin_pag_juros", "label": "Juros e gastos similares", "notas": "", "kind": "flow", "field": "cf_fin_pag_juros", "indent": 1},
+	{"code": "fin_pag_dividendos", "label": "Dividendos", "notas": "", "kind": "flow", "field": "cf_fin_pag_dividendos", "indent": 1},
+	{"code": "fin_pag_reducoes", "label": "Reduções de capital e de outros instrumentos de capital próprio", "notas": "", "kind": "flow", "field": "cf_fin_pag_reducoes", "indent": 1},
+	{"code": "fin_pag_outras", "label": "Outras operações de financiamento", "notas": "", "kind": "flow", "field": "cf_fin_pag_outras", "indent": 1},
+	{"code": "fluxo_financiamento", "label": "Fluxos de caixa das atividades de financiamento", "notas": "", "kind": "formula",
+	 "expr": "(fin_receb_financiamentos + fin_receb_capital + fin_receb_cobertura + fin_receb_doacoes + fin_receb_outras)"
+	         " - (fin_pag_financiamentos + fin_pag_juros + fin_pag_dividendos + fin_pag_reducoes + fin_pag_outras)", "bold": 1, "strong": 1},
+
+	{"code": "variacao_caixa", "label": "Variação de caixa e seus equivalentes", "notas": "", "kind": "formula",
+	 "expr": "fluxo_operacional + fluxo_investimento + fluxo_financiamento", "bold": 1, "strong": 1},
+	{"code": "efeito_cambio", "label": "Efeito das diferenças de câmbio", "notas": "", "kind": "flow", "field": "cf_efeito_cambio"},
+	{"code": "caixa_inicio", "label": "Caixa e seus equivalentes no início do período", "notas": "43,47", "kind": "cash_open", "field": "cf_caixa", "bold": 1},
+	{"code": "caixa_fim", "label": "Caixa e seus equivalentes no fim do período", "notas": "43,47", "kind": "cash_close", "field": "cf_caixa", "bold": 1, "strong": 1},
+]
+
+ANGOLA_CF_ACCOUNT_FIELDS = [
+	"cf_receb_clientes", "cf_pag_fornecedores", "cf_pag_pessoal", "cf_imposto_rendimento", "cf_outro_receb_pag",
+	"cf_inv_pag_tangiveis", "cf_inv_pag_intangiveis", "cf_inv_pag_financeiros", "cf_inv_pag_outros",
+	"cf_inv_receb_tangiveis", "cf_inv_receb_intangiveis", "cf_inv_receb_financeiros", "cf_inv_receb_outros",
+	"cf_inv_subsidios", "cf_inv_juros", "cf_inv_dividendos",
+	"cf_fin_receb_financiamentos", "cf_fin_receb_capital", "cf_fin_receb_cobertura", "cf_fin_receb_doacoes", "cf_fin_receb_outras",
+	"cf_fin_pag_financiamentos", "cf_fin_pag_juros", "cf_fin_pag_dividendos", "cf_fin_pag_reducoes", "cf_fin_pag_outras",
+	"cf_caixa", "cf_efeito_cambio",
+]
+
+# Lines where a HIGHER value is unfavorable (cash going out) — drives variation colour.
+CF_OUTFLOW_CODES = {
+	"pag_fornecedores", "pag_pessoal",
+	"inv_pag_tangiveis", "inv_pag_intangiveis", "inv_pag_financeiros", "inv_pag_outros",
+	"fin_pag_financiamentos", "fin_pag_juros", "fin_pag_dividendos", "fin_pag_reducoes", "fin_pag_outras",
+}
+
+# Best-effort PGC-A mapping (ITEC chart). None = map manually.
+ANGOLA_CF_STANDARD_NUMBERS = {
+	"cf_receb_clientes": "31",
+	"cf_pag_fornecedores": "32",
+	"cf_pag_pessoal": "36",
+	"cf_imposto_rendimento": "34",
+	"cf_outro_receb_pag": "37",
+	"cf_inv_pag_tangiveis": "11",
+	"cf_inv_pag_intangiveis": "12",
+	"cf_inv_pag_financeiros": None,
+	"cf_inv_pag_outros": None,
+	"cf_inv_receb_tangiveis": None,
+	"cf_inv_receb_intangiveis": None,
+	"cf_inv_receb_financeiros": None,
+	"cf_inv_receb_outros": None,
+	"cf_inv_subsidios": None,
+	"cf_inv_juros": "66",
+	"cf_inv_dividendos": None,
+	"cf_fin_receb_financiamentos": "33",
+	"cf_fin_receb_capital": "5",
+	"cf_fin_receb_cobertura": None,
+	"cf_fin_receb_doacoes": None,
+	"cf_fin_receb_outras": None,
+	"cf_fin_pag_financiamentos": None,
+	"cf_fin_pag_juros": "76",
+	"cf_fin_pag_dividendos": None,
+	"cf_fin_pag_reducoes": None,
+	"cf_fin_pag_outras": None,
+	"cf_caixa": "4",
+	"cf_efeito_cambio": None,
+}
+
+
+@frappe.whitelist()
+def automap_cash_flow_accounts(overwrite=0):
+	"""Fill each cash-flow account field from its standard PGC-A number."""
+	if not _can_manage_angola():
+		frappe.throw(_("Only an Accounts / System Manager can map the accounts."), frappe.PermissionError)
+
+	doc = frappe.get_single(ANGOLA_CF_DOCTYPE)
+	company = doc.default_company or frappe.defaults.get_user_default("Company")
+	if not company:
+		frappe.throw(_("Set the Company first, then map the standard accounts."))
+
+	overwrite = cint(overwrite)
+	filled, not_found = [], []
+	for field, number in ANGOLA_CF_STANDARD_NUMBERS.items():
+		if not number:
+			continue
+		if doc.get(field) and not overwrite:
+			continue
+		account = frappe.db.get_value("Account", {"account_number": number, "company": company}, "name")
+		if account:
+			doc.set(field, account)
+			filled.append(number)
+		else:
+			not_found.append(number)
+
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+	return {"company": company, "filled": sorted(set(filled)), "not_found": sorted(set(not_found))}
+
+
+@frappe.whitelist()
+def get_cash_flow_config():
+	_assert_access()
+	doc = frappe.get_single(ANGOLA_CF_DOCTYPE)
+	mapped = sum(1 for f in ANGOLA_CF_ACCOUNT_FIELDS if doc.get(f))
+	return {
+		"enabled": cint(doc.enabled),
+		"statement_title": doc.statement_title or ANGOLA_CF_TITLE,
+		"default_company": doc.default_company or frappe.defaults.get_user_default("Company"),
+		"default_fiscal_year": doc.default_fiscal_year,
+		"mapped_accounts": mapped,
+		"configured": 1 if mapped else 0,
+		"can_manage": 1 if _can_manage_angola() else 0,
+	}
+
+
+@frappe.whitelist()
+def get_cash_flow_settings():
+	"""Current account mappings for the cash flow, for the settings modal."""
+	_assert_access()
+	doc = frappe.get_single(ANGOLA_CF_DOCTYPE)
+	data = {
+		"default_company": doc.default_company or frappe.defaults.get_user_default("Company"),
+		"default_fiscal_year": doc.default_fiscal_year,
+		"statement_title": doc.statement_title or ANGOLA_CF_TITLE,
+		"can_manage": 1 if _can_manage_angola() else 0,
+	}
+	for f in ANGOLA_CF_ACCOUNT_FIELDS:
+		data[f] = doc.get(f)
+	return data
+
+
+@frappe.whitelist()
+def save_cash_flow_settings(payload):
+	if not _can_manage_angola():
+		frappe.throw(_("Only an Accounts / System Manager can change these settings."), frappe.PermissionError)
+	if isinstance(payload, str):
+		payload = frappe.parse_json(payload)
+	payload = payload or {}
+	doc = frappe.get_single(ANGOLA_CF_DOCTYPE)
+	for f in ["default_company", "default_fiscal_year"] + ANGOLA_CF_ACCOUNT_FIELDS:
+		if f in payload:
+			doc.set(f, payload.get(f) or None)
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+	return get_cash_flow_settings()
+
+
+def _cf_cash_balance(account, as_of, missing):
+	"""Cumulative cash balance as of a date (assets: debit - credit)."""
+	if not account:
+		return 0.0
+	cd, root = _account_credit_debit(account, None, as_of)
+	if cd is None:
+		missing.add(account)
+		return 0.0
+	return cd if root in ("Income", "Liability", "Equity") else -cd
+
+
+def _cf_compute(doc, start, end, missing):
+	"""Values for one fiscal year: flows over [start, end] + opening/closing cash."""
+	values = {}
+	for line in ANGOLA_CF:
+		kind = line["kind"]
+		if kind == "flow":
+			values[line["code"]] = _magnitude(doc.get(line["field"]), start, end, missing)
+		elif kind == "cash_open":
+			values[line["code"]] = _cf_cash_balance(doc.get(line["field"]), add_days(getdate(start), -1), missing)
+		elif kind == "cash_close":
+			values[line["code"]] = _cf_cash_balance(doc.get(line["field"]), end, missing)
+	for line in ANGOLA_CF:
+		if line["kind"] == "formula":
+			values[line["code"]] = _eval_formula(line["expr"], values)
+	return values
+
+
+@frappe.whitelist()
+def get_angola_cash_flow(fiscal_year=None, company=None):
+	"""Compute the two-column (N + N-1) Demonstração de Fluxos de Caixa."""
+	_assert_access()
+
+	doc = frappe.get_single(ANGOLA_CF_DOCTYPE)
+	company = company or doc.default_company or frappe.defaults.get_user_default("Company")
+	if not company:
+		company = frappe.db.get_value("Company", {}, "name")
+	fiscal_year = fiscal_year or doc.default_fiscal_year
+	if not fiscal_year:
+		fy = frappe.get_all("Fiscal Year", fields=["name"], order_by="year_start_date desc", limit=1)
+		fiscal_year = fy[0].name if fy else None
+	if not fiscal_year:
+		frappe.throw(_("No Fiscal Year found. Create one first."))
+
+	start, end = _fiscal_year_range(fiscal_year)
+	prev_start, prev_end = _prev_fiscal_year_range(start, end)
+	currency = _company_currency(company)
+
+	missing = set()
+	cur = _cf_compute(doc, start, end, missing)
+	prev = _cf_compute(doc, prev_start, prev_end, set())
+
+	rows = []
+	for line in ANGOLA_CF:
+		code = line["code"]
+		is_header = line["kind"] in ("header", "subheader")
+		pol = "good_down" if code in CF_OUTFLOW_CODES else "good_up"
+		cur_v = None if is_header else flt(cur.get(code))
+		prev_v = None if is_header else flt(prev.get(code))
+		var = pct = status = None
+		if not is_header:
+			var, pct, status = _variation(cur_v, prev_v, pol)
+		rows.append(
+			{
+				"row_code": code,
+				"label": line["label"],
+				"notas": line.get("notas", ""),
+				"kind": line["kind"],
+				"is_header": 1 if is_header else 0,
+				"line_type": "Header" if is_header else ("Formula" if line["kind"] == "formula" else "Account"),
+				"bold": cint(line.get("bold")),
+				"strong": cint(line.get("strong")),
+				"indent": cint(line.get("indent")),
+				"current": cur_v,
+				"previous": prev_v,
+				"variation": var,
+				"variation_pct": pct,
+				"status": status,
+				"drillable": 1 if (line["kind"] in ("flow", "cash_open", "cash_close") and doc.get(line.get("field"))) else 0,
+			}
+		)
+
+	# Reconciliation: opening + variação + câmbio should equal the closing balance.
+	expected_close = flt(cur.get("caixa_inicio")) + flt(cur.get("variacao_caixa")) + flt(cur.get("efeito_cambio"))
+	actual_close = flt(cur.get("caixa_fim"))
+	return {
+		"title": doc.statement_title or ANGOLA_CF_TITLE,
+		"company": company,
+		"currency": currency,
+		"fiscal_year": fiscal_year,
+		"current_label": getdate(end).year if end else "",
+		"previous_label": getdate(prev_end).year if prev_end else "",
+		"rows": rows,
+		"missing_accounts": sorted(missing),
+		"expected_close": expected_close,
+		"actual_close": actual_close,
+		"reconciled": abs(expected_close - actual_close) < 1.0,
+		"difference": expected_close - actual_close,
+		"can_manage": 1 if _can_manage_angola() else 0,
+	}
+
+
+@frappe.whitelist()
+def drill_cash_flow(row_code, account=None, fiscal_year=None, company=None):
+	"""Children of a cash-flow line's account (or of a given account, deeper levels)."""
+	_assert_access()
+	line = next((l for l in ANGOLA_CF if l["code"] == row_code), None)
+	if not line or line["kind"] not in ("flow", "cash_open", "cash_close"):
+		return {"rows": []}
+
+	doc = frappe.get_single(ANGOLA_CF_DOCTYPE)
+	company, start, end, prev_start, prev_end = _drill_context(doc, fiscal_year, company)
+	polarity = "good_down" if row_code in CF_OUTFLOW_CODES else "good_up"
+	accounts = _children_of(account or doc.get(line["field"]), company)
+
+	if line["kind"] == "cash_open":
+		# opening balances: cumulative to the day before each year starts
+		return {"rows": _drill_nodes(accounts, "magnitude", polarity, None, add_days(getdate(start), -1),
+		                             None, add_days(getdate(prev_start), -1))}
+	if line["kind"] == "cash_close":
+		return {"rows": _drill_nodes(accounts, "magnitude", polarity, None, end, None, prev_end)}
+	return {"rows": _drill_nodes(accounts, "magnitude", polarity, start, end, prev_start, prev_end)}

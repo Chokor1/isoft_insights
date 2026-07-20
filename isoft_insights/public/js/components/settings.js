@@ -59,6 +59,10 @@ isoft_insights.views.settings = function (ctx) {
 					<div><span class="ii-field-label">Display Currency</span><input class="form-control" id="s-currency" value="${esc(s.default_currency || '')}" ${dis}></div>
 					<div><span class="ii-field-label">Default Period</span><select class="form-control" id="s-period" ${dis}>${periodOpts}</select></div>
 					<div><span class="ii-field-label">Top N (lists)</span><input type="number" min="1" class="form-control" id="s-topn" value="${esc(s.top_n)}" ${dis}></div>
+					<div><span class="ii-field-label">Currency</span>
+						<label class="ii-chk"><input type="checkbox" id="s-hidecur" ${cint(s.hide_price_currency) ? 'checked' : ''} ${dis}>
+							Hide currency symbol next to values</label>
+					</div>
 				</div>
 				${manage ? `<div style="margin-top:18px;"><button class="btn btn-primary" id="s-save"><i class="fa fa-save"></i> Save settings</button>
 					<button class="btn btn-default" id="s-openform" style="margin-left:8px;"><i class="fa fa-external-link"></i> Open full form</button></div>` :
@@ -85,12 +89,14 @@ isoft_insights.views.settings = function (ctx) {
 				default_company: ctx.$content.find('#s-company').val(),
 				default_currency: ctx.$content.find('#s-currency').val(),
 				default_period: ctx.$content.find('#s-period').val(),
-				top_n: cint(ctx.$content.find('#s-topn').val()) || 10
+				top_n: cint(ctx.$content.find('#s-topn').val()) || 10,
+				hide_price_currency: ctx.$content.find('#s-hidecur').is(':checked') ? 1 : 0
 			};
 			const $btn = $(this).prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i> Saving…');
 			ctx.api('save_insights_settings', { payload: JSON.stringify(payload) }).then((res) => {
 				ctx.state.settings = res || ctx.state.settings;
 				ctx.app.state.currency = res.default_currency || ctx.app.state.currency;
+				ctx.app.state.hide_currency = cint(res.hide_price_currency) ? 1 : 0;
 				frappe.show_alert({ message: 'Isoft Insights settings saved', indicator: 'green' });
 				$btn.prop('disabled', false).html('<i class="fa fa-save"></i> Save settings');
 			}).catch(() => {
