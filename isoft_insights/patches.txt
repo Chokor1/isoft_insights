@@ -1,0 +1,1 @@
+isoft_insights.patches.v1_0.normalize_insights_access_lists

@@ -5,6 +5,8 @@
 # All UI-facing endpoints are whitelisted and guarded by _assert_access().
 
 import ast
+import html
+import re
 
 import frappe
 from frappe import _
@@ -24,6 +26,48 @@ SETTINGS_DOCTYPE = "Isoft Insights Settings"
 ANGOLA_PL_DOCTYPE = "Isoft Angola Income Statement Settings"
 ANGOLA_PL_TITLE = "Demonstração de Resultados"
 
+# Used when "Allowed Roles" is left empty.
+DEFAULT_ACCESS_ROLE = "Isoft Insights User"
+
+# Newline, comma, semicolon, pipe, <br> in any spelling, or a block-level tag
+# boundary (<p>, </div>, <li> ...) -- one or more of them in a row.
+_ACCESS_SEPARATORS = re.compile(
+	r"(?:<\s*/?\s*(?:br|p|div|li|ul|ol|tr|td|span)\s*/?\s*>|[\r\n,;|])+",
+	re.IGNORECASE,
+)
+_HTML_TAG = re.compile(r"<[^>]*>")
+
+
+def normalize_access_list(value):
+	"""Split a stored access list into clean entries.
+
+	The access fields are Small Text but are edited both from the desk form and
+	from the Insights settings tab, so the stored value can end up holding HTML
+	line breaks instead of real newlines. A literal ``<br>`` used to be read as
+	part of the role name, which made the role check match nobody.
+
+	Accepts a list/tuple or a string separated by newlines, ``<br>`` in any
+	form, commas, semicolons or pipes. Returns de-duplicated, non-empty entries
+	in the order they were written.
+	"""
+	if isinstance(value, (list, tuple)):
+		text = "\n".join(str(v) for v in value)
+	else:
+		text = str(value or "")
+
+	# Entities first, so "&lt;br&gt;" and "&nbsp;" are seen as markup / space.
+	text = html.unescape(text)
+
+	out = []
+	seen = set()
+	for item in _ACCESS_SEPARATORS.split(text):
+		item = _HTML_TAG.sub(" ", item).replace("\xa0", " ").strip()
+		if not item or item in seen:
+			continue
+		seen.add(item)
+		out.append(item)
+	return out
+
 
 # --------------------------------------------------------------------------- #
 # Settings & access control
@@ -32,9 +76,6 @@ ANGOLA_PL_TITLE = "Demonstração de Resultados"
 def get_insights_settings():
 	"""Return the Isoft Insights settings as a plain dict for the front-end."""
 	s = frappe.get_single(SETTINGS_DOCTYPE)
-
-	def _lines(value):
-		return [v.strip() for v in (value or "").splitlines() if v.strip()]
 
 	default_company = s.default_company or frappe.defaults.get_user_default("Company")
 	currency = s.default_currency or _company_currency(default_company)
@@ -46,8 +87,8 @@ def get_insights_settings():
 		"top_n": cint(s.top_n) or 10,
 		"hide_price_currency": cint(getattr(s, "hide_price_currency", 0)),
 		"access_mode": s.access_mode or "By Role",
-		"allowed_roles": _lines(s.allowed_roles) or ["Sales Manager"],
-		"allowed_users": _lines(s.allowed_users),
+		"allowed_roles": normalize_access_list(s.allowed_roles) or [DEFAULT_ACCESS_ROLE],
+		"allowed_users": normalize_access_list(s.allowed_users),
 		"can_access": 1 if _has_access() else 0,
 		"can_manage": 1 if ("System Manager" in frappe.get_roles()) else 0,
 	}
@@ -67,12 +108,9 @@ def _has_access():
 	mode = (s.access_mode or "By Role").strip().lower()
 
 	if mode == "by user":
-		allowed = [u.strip() for u in (s.allowed_users or "").splitlines() if u.strip()]
-		return user in allowed
+		return user in normalize_access_list(s.allowed_users)
 
-	allowed_roles = [r.strip() for r in (s.allowed_roles or "").splitlines() if r.strip()] or [
-		"Isoft Insights User"
-	]
+	allowed_roles = normalize_access_list(s.allowed_roles) or [DEFAULT_ACCESS_ROLE]
 	return bool(roles.intersection(allowed_roles))
 
 
@@ -755,13 +793,6 @@ def save_insights_settings(payload):
 
 	s = frappe.get_single(SETTINGS_DOCTYPE)
 
-	def _norm_lines(value):
-		if isinstance(value, (list, tuple)):
-			items = [str(v).strip() for v in value]
-		else:
-			items = [v.strip() for v in str(value or "").splitlines()]
-		return "\n".join([v for v in items if v])
-
 	allowed_fields = {
 		"default_company", "default_currency", "default_period", "top_n", "access_mode",
 		"hide_price_currency",
@@ -771,9 +802,9 @@ def save_insights_settings(payload):
 			s.set(f, payload.get(f))
 
 	if "allowed_roles" in payload:
-		s.allowed_roles = _norm_lines(payload.get("allowed_roles"))
+		s.allowed_roles = "\n".join(normalize_access_list(payload.get("allowed_roles")))
 	if "allowed_users" in payload:
-		s.allowed_users = _norm_lines(payload.get("allowed_users"))
+		s.allowed_users = "\n".join(normalize_access_list(payload.get("allowed_users")))
 
 	s.save(ignore_permissions=True)
 	frappe.db.commit()
