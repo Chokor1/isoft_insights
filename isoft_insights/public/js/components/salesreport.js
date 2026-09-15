@@ -435,8 +435,7 @@ function injectStyles() {
 		.ii-sr-row { cursor: pointer; }
 		.ii-sr-row .ii-caret { transition: transform .2s; color: var(--ii-muted); margin-right: 7px; font-size: 11px; }
 		.ii-sr-row.open .ii-caret { transform: rotate(90deg); color: var(--ii-primary); }
-		.ii-sr-row.open > td { background: #eef2ff; }
-		[data-theme="dark"] .ii-sr-row.open > td { background: rgba(59,130,246,0.16); }
+		.ii-sr-row.open > td { background: var(--ii-soft-solid); }
 		.sr-link-wrap { display: inline-block; min-width: 160px; }
 		.sr-link-wrap .form-group { margin-bottom: 0 !important; }
 		.sr-link-wrap .control-label, .sr-link-wrap .help-box { display: none !important; }

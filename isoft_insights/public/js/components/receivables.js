@@ -34,10 +34,10 @@ isoft_insights.views.receivables = function (ctx) {
 		ctx.$content.find('#ii-rec-kpis').html(`
 			<div class="ii-grid" style="margin-bottom:8px;">
 				<div class="ii-kpi"><div class="ii-kpi-label">Total Outstanding</div><div class="ii-kpi-value">${ctx.money(totals.total_outstanding)}</div></div>
-				<div class="ii-kpi"><div class="ii-kpi-label">Current</div><div class="ii-kpi-value" style="color:#166534">${ctx.money(totals.current_amt)}</div></div>
-				<div class="ii-kpi"><div class="ii-kpi-label">1–30 days</div><div class="ii-kpi-value" style="color:#854d0e">${ctx.money(totals.b1_30)}</div></div>
-				<div class="ii-kpi"><div class="ii-kpi-label">31–90 days</div><div class="ii-kpi-value" style="color:#9a3412">${ctx.money(flt(totals.b31_60) + flt(totals.b61_90))}</div></div>
-				<div class="ii-kpi"><div class="ii-kpi-label">90+ days</div><div class="ii-kpi-value" style="color:#991b1b">${ctx.money(totals.b90_plus)}</div></div>
+				<div class="ii-kpi"><div class="ii-kpi-label">Current</div><div class="ii-kpi-value" style="color:var(--ii-ok)">${ctx.money(totals.current_amt)}</div></div>
+				<div class="ii-kpi"><div class="ii-kpi-label">1–30 days</div><div class="ii-kpi-value" style="color:var(--ii-warn)">${ctx.money(totals.b1_30)}</div></div>
+				<div class="ii-kpi"><div class="ii-kpi-label">31–90 days</div><div class="ii-kpi-value" style="color:var(--ii-orange)">${ctx.money(flt(totals.b31_60) + flt(totals.b61_90))}</div></div>
+				<div class="ii-kpi"><div class="ii-kpi-label">90+ days</div><div class="ii-kpi-value" style="color:var(--ii-bad)">${ctx.money(totals.b90_plus)}</div></div>
 			</div>
 		`);
 	};

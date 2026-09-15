@@ -1,61 +1,49 @@
 // Isoft Insights - Sales analytics SPA shell.
-// Builds a modern toolbar + tab router and lazy-loads view components that
-// render into the content area. Shared state (period, dates, company, currency)
-// and helpers (api, money) are exposed on `isoft_insights.app`.
+// Invenza-style shell: a collapsible left sidebar (views, fullscreen, collapse,
+// company) and a slim sticky header (view title + period filter). View
+// components are lazy-loaded and render into #ii-content. Shared state (period,
+// dates, company, currency) and helpers (api, money) are exposed on
+// `isoft_insights.app`.
 
 frappe.provide('isoft_insights');
 frappe.provide('isoft_insights.views');
 
 isoft_insights.METHOD = 'isoft_insights.isoft_insights.utils.';
-
-isoft_insights.THEMES = {
-	Blue:   { p: '#2563eb', d: '#1e40af', a: '#3b82f6' },
-	Green:  { p: '#059669', d: '#047857', a: '#10b981' },
-	Purple: { p: '#7c3aed', d: '#5b21b6', a: '#8b5cf6' },
-	Orange: { p: '#ea580c', d: '#c2410c', a: '#f97316' },
-	Slate:  { p: '#475569', d: '#334155', a: '#64748b' },
-	Dark:   { p: '#0f172a', d: '#020617', a: '#334155' }
-};
+isoft_insights.ROUTE = 'isoft-insights';
 
 // period: whether the global period/date filter applies to this view.
+// tone: meaning-colour of the sidebar icon, same vocabulary as Invenza —
+// item (brand), stock (amber), money (green), buy (violet), perf (teal), muted.
 isoft_insights.VIEWS = [
-	{ key: 'overview',    label: 'Overview',    icon: 'fa-tachometer',  file: 'overview',    period: true },
-	{ key: 'salesreport', label: 'Sales Report', icon: 'fa-shopping-cart', file: 'salesreport', period: false },
-	{ key: 'customers',   label: 'Customers',   icon: 'fa-users',       file: 'customers',   period: true },
-	{ key: 'items',       label: 'Products',    icon: 'fa-cube',        file: 'items',       period: true },
-	{ key: 'matrix',      label: 'Matrix',      icon: 'fa-th',          file: 'matrix',      period: false },
-	{ key: 'salesteam',   label: 'Sales Team',  icon: 'fa-user-circle', file: 'salesteam',   period: true },
-	{ key: 'receivables', label: 'Receivables', icon: 'fa-credit-card', file: 'receivables', period: false },
-	{ key: 'payables',    label: 'Payables',    icon: 'fa-money',       file: 'payables',    period: false },
-	{ key: 'balancesheet', label: 'Demonstração de Resultados', icon: 'fa-file-text-o', file: 'balancesheet', period: false },
-	{ key: 'balanco',     label: 'Balanço',     icon: 'fa-balance-scale', file: 'balanco',    period: false },
-	{ key: 'cashflow',    label: 'Fluxos de Caixa', icon: 'fa-exchange', file: 'cashflow',   period: false },
-	{ key: 'settings',    label: 'Settings',    icon: 'fa-cog',         file: 'settings',    period: false }
+	{ key: 'overview',    label: 'Overview',    icon: 'fa-tachometer',  tone: 'perf',  file: 'overview',    period: true },
+	{ key: 'salesreport', label: 'Sales Report', icon: 'fa-shopping-cart', tone: 'money', file: 'salesreport', period: false },
+	{ key: 'customers',   label: 'Customers',   icon: 'fa-users',       tone: 'item',  file: 'customers',   period: true },
+	{ key: 'items',       label: 'Products',    icon: 'fa-cube',        tone: 'stock', file: 'items',       period: true },
+	{ key: 'matrix',      label: 'Matrix',      icon: 'fa-th',          tone: 'perf',  file: 'matrix',      period: false },
+	{ key: 'salesteam',   label: 'Sales Team',  icon: 'fa-user-circle', tone: 'item',  file: 'salesteam',   period: true },
+	{ key: 'receivables', label: 'Receivables', icon: 'fa-credit-card', tone: 'money', file: 'receivables', period: false },
+	{ key: 'payables',    label: 'Payables',    icon: 'fa-money',       tone: 'buy',   file: 'payables',    period: false },
+	{ key: 'balancesheet', label: 'Demonstração de Resultados', icon: 'fa-file-text-o', tone: 'perf', file: 'balancesheet', period: false },
+	{ key: 'balanco',     label: 'Balanço',     icon: 'fa-balance-scale', tone: 'item', file: 'balanco',    period: false },
+	{ key: 'cashflow',    label: 'Fluxos de Caixa', icon: 'fa-exchange', tone: 'money', file: 'cashflow',  period: false },
+	{ key: 'settings',    label: 'Settings',    icon: 'fa-cog',         tone: 'muted', file: 'settings',    period: false }
 ];
 
-// Navbar groups: each group is a dropdown of views. Single-view groups act as a
-// plain button. `key` must be unique; `views` reference isoft_insights.VIEWS keys.
+// Sidebar sections. A multi-view group gets a heading; a single-view group is
+// a plain link under a separator. `views` reference isoft_insights.VIEWS keys.
 isoft_insights.GROUPS = [
 	{ key: 'sales',      label: 'Sales',      icon: 'fa-line-chart', views: ['overview', 'salesreport', 'customers', 'items', 'matrix', 'salesteam'] },
 	{ key: 'accounting', label: 'Accounting', icon: 'fa-book',       views: ['balancesheet', 'balanco', 'cashflow', 'receivables', 'payables'] },
 	{ key: 'settings',   label: 'Settings',   icon: 'fa-cog',        views: ['settings'] }
 ];
 
-// Hide the Frappe desk chrome (top navbar + page head) while on this page, like Invenza,
-// so it looks like a standalone app. Restored automatically when navigating away.
+// Hide the desk chrome (navbar + page head) only while this route is open.
+// It is a body class, not .hide(): the rules live in the shell stylesheet,
+// which stays in the DOM after navigating away, so they must be scoped or the
+// navbar would vanish from every other desk page.
 isoft_insights.apply_chrome = function () {
 	const route = (frappe.get_route_str && frappe.get_route_str()) || '';
-	const standalone = route.indexOf('isoft-insights') !== -1;
-	const $chrome = $('header.navbar, .navbar.sticky-top, .navbar.navbar-default.navbar-fixed-top, .navbar-expand-lg, .page-head');
-	if (standalone) {
-		$chrome.hide();
-		$('.layout-main-section-wrapper').css('margin-top', '0');
-		$('.page-container').css('padding-top', '0');
-	} else {
-		$chrome.show();
-		$('.layout-main-section-wrapper').css('margin-top', '');
-		$('.page-container').css('padding-top', '');
-	}
+	$('body').toggleClass('ii-page', route.indexOf(isoft_insights.ROUTE) !== -1);
 };
 
 frappe.pages['isoft-insights'].on_page_load = function (wrapper) {
@@ -68,8 +56,13 @@ frappe.pages['isoft-insights'].on_page_load = function (wrapper) {
 
 	isoft_insights.apply_chrome();
 	[100, 400, 900].forEach((t) => setTimeout(isoft_insights.apply_chrome, t));
+	// Frappe v13 never calls on_page_hide and routes with pushState, so
+	// hashchange does not fire either; page-change is what the desk container
+	// triggers on every route, and it is the only reliable way to hand back the
+	// navbar when the user leaves.
 	if (!isoft_insights._chrome_bound) {
 		isoft_insights._chrome_bound = true;
+		$(document).on('page-change', isoft_insights.apply_chrome);
 		$(window).on('hashchange', isoft_insights.apply_chrome);
 	}
 };
@@ -84,9 +77,7 @@ frappe.pages['isoft-insights'].on_page_show = function () {
 
 frappe.pages['isoft-insights'].on_page_hide = function () {
 	// Restore the chrome for the rest of the desk
-	$('header.navbar, .navbar.sticky-top, .navbar.navbar-default.navbar-fixed-top, .navbar-expand-lg, .page-head').show();
-	$('.layout-main-section-wrapper').css('margin-top', '');
-	$('.page-container').css('padding-top', '');
+	$('body').removeClass('ii-page');
 };
 
 isoft_insights.App = class App {
@@ -107,6 +98,9 @@ isoft_insights.App = class App {
 		};
 		this.inject_styles();
 		this.build_shell();
+		let collapsed = false;
+		try { collapsed = localStorage.getItem('ii_sidebar_collapsed') === '1'; } catch (e) { /* storage blocked */ }
+		this.apply_sidebar_state(collapsed);
 		this.load_settings();
 	}
 
@@ -157,8 +151,7 @@ isoft_insights.App = class App {
 			this.state.company = s.default_company || null;
 			this.state.currency = s.default_currency || 'USD';
 			this.state.hide_currency = cint(s.hide_price_currency) ? 1 : 0;
-			// Accent is fixed; light/dark follows the Frappe desk theme via CSS.
-			this.apply_theme('Blue');
+			// Colours come from the stylesheet tokens; light/dark follows the desk theme.
 
 			if (!s.can_access) {
 				this.show_lock();
@@ -174,77 +167,89 @@ isoft_insights.App = class App {
 		});
 	}
 
-	apply_theme(name) {
-		const t = isoft_insights.THEMES[name] || isoft_insights.THEMES.Blue;
-		const root = this.page.main.find('.ii-root')[0];
-		if (root) {
-			root.style.setProperty('--ii-primary', t.p);
-			root.style.setProperty('--ii-primary-dark', t.d);
-			root.style.setProperty('--ii-accent', t.a);
-		}
-	}
-
 	// ---- shell ----
 	build_shell() {
+		const esc = frappe.utils.escape_html;
 		const viewById = (k) => isoft_insights.VIEWS.find((v) => v.key === k);
-		const tabs = isoft_insights.GROUPS.map((g) => {
+		const link = (v) => `
+			<button type="button" class="ii-nav-link" data-view="${v.key}" title="${esc(v.label)}">
+				<span class="ii-nav-icon"><i class="fa ${v.icon} ii-i-${v.tone || 'muted'}"></i></span>
+				<span class="ii-nav-label">${esc(v.label)}</span>
+			</button>`;
+		const nav = isoft_insights.GROUPS.map((g) => {
 			const views = (g.views || []).map(viewById).filter(Boolean);
-			const single = views.length === 1;
-			const menu = views.map((v) => `
-				<button class="ii-menu-item" data-view="${v.key}">
-					<i class="fa ${v.icon}"></i> ${v.label}
-				</button>`).join('');
-			return `
-				<div class="ii-group" data-group="${g.key}">
-					<button class="ii-tab ii-group-btn" ${single ? `data-view="${views[0].key}"` : ''}>
-						<i class="fa ${g.icon}"></i> ${g.label}
-						${single ? '' : '<i class="fa fa-angle-down ii-caret-down"></i>'}
-					</button>
-					${single ? '' : `<div class="ii-group-menu">${menu}</div>`}
-				</div>`;
+			if (!views.length) return '';
+			const head = views.length > 1
+				? `<div class="ii-nav-heading"><span class="ii-nav-label">${esc(g.label)}</span></div>`
+				: '<div class="ii-nav-sep"></div>';
+			return head + views.map(link).join('');
 		}).join('');
 
 		this.page.main.html(`
 			<div class="ii-root">
-				<div class="ii-bar">
+				<aside class="ii-sidebar">
 					<div class="ii-brand">
-						<span class="ii-brand-logo"><i class="fa fa-line-chart"></i></span>
+						<button type="button" class="ii-brand-logo" id="ii-home" title="Overview"><i class="fa fa-line-chart"></i></button>
 						<span class="ii-brand-meta">
 							<span class="ii-brand-name">Isoft Insights</span>
 							<span class="ii-brand-tag">Sales &amp; Purchase</span>
 						</span>
 					</div>
-					<div class="ii-tabs">${tabs}</div>
-					<div class="ii-filters">
-						<select class="form-control ii-input" id="ii-period">
-							<option>This Month</option>
-							<option>This Quarter</option>
-							<option>This Year</option>
-							<option>Last 12 Months</option>
-							<option>All Time</option>
-							<option value="Custom">Custom Range</option>
-						</select>
-						<input type="date" class="form-control ii-input ii-custom-date" id="ii-from" style="display:none;">
-						<input type="date" class="form-control ii-input ii-custom-date" id="ii-to" style="display:none;">
-						<select class="form-control ii-input" id="ii-company"></select>
-						<button class="btn btn-default ii-refresh" id="ii-truefs" title="Fullscreen (hide browser tabs)">
-							<i class="fa fa-arrows-alt"></i>
-						</button>
-						<button class="btn btn-default ii-refresh" id="ii-refresh" title="Refresh">
-							<i class="fa fa-refresh"></i>
-						</button>
-					</div>
-				</div>
 
-				<div id="ii-content"><div class="ii-loading"><i class="fa fa-spinner fa-spin"></i> Loading…</div></div>
+					<nav class="ii-nav">
+						${nav}
+						<div class="ii-nav-sep"></div>
+						<button type="button" class="ii-nav-link" id="ii-truefs" title="Fullscreen (hide browser tabs)">
+							<span class="ii-nav-icon"><i class="fa fa-arrows-alt ii-i-muted"></i></span>
+							<span class="ii-nav-label">Fullscreen</span>
+						</button>
+						<button type="button" class="ii-nav-link" id="ii-sb-toggle" title="Collapse sidebar">
+							<span class="ii-nav-icon"><i class="fa fa-angle-double-left ii-i-muted"></i></span>
+							<span class="ii-nav-label">Collapse</span>
+						</button>
+					</nav>
 
-				<div class="ii-lock" id="ii-lock" style="display:none;">
-					<div class="ii-lock-box">
-						<i class="fa fa-lock"></i>
-						<h3>Access restricted</h3>
-						<p id="ii-lock-msg">You don't have permission to view Isoft Insights. Ask an administrator to grant access in <b>Isoft Insights Settings</b>.</p>
+					<div class="ii-sb-foot">
+						<label class="ii-company-wrap" title="Company">
+							<i class="fa fa-building"></i>
+							<select class="ii-company-select" id="ii-company"></select>
+						</label>
 					</div>
-				</div>
+				</aside>
+
+				<main class="ii-main">
+					<div class="ii-bar">
+						<div class="ii-head">
+							<div class="ii-head-crumb" id="ii-crumb"></div>
+							<div class="ii-head-title" id="ii-title">Isoft Insights</div>
+						</div>
+						<div class="ii-filters">
+							<select class="form-control ii-input" id="ii-period">
+								<option>This Month</option>
+								<option>This Quarter</option>
+								<option>This Year</option>
+								<option>Last 12 Months</option>
+								<option>All Time</option>
+								<option value="Custom">Custom Range</option>
+							</select>
+							<input type="date" class="form-control ii-input ii-custom-date" id="ii-from" style="display:none;">
+							<input type="date" class="form-control ii-input ii-custom-date" id="ii-to" style="display:none;">
+							<button class="btn btn-default ii-refresh" id="ii-refresh" title="Refresh">
+								<i class="fa fa-refresh"></i>
+							</button>
+						</div>
+					</div>
+
+					<div id="ii-content"><div class="ii-loading"><i class="fa fa-spinner fa-spin"></i> Loading…</div></div>
+
+					<div class="ii-lock" id="ii-lock" style="display:none;">
+						<div class="ii-lock-box">
+							<i class="fa fa-lock"></i>
+							<h3>Access restricted</h3>
+							<p id="ii-lock-msg">You don't have permission to view Isoft Insights. Ask an administrator to grant access in <b>Isoft Insights Settings</b>.</p>
+						</div>
+					</div>
+				</main>
 			</div>
 		`);
 
@@ -271,55 +276,42 @@ isoft_insights.App = class App {
 
 		this.page.main.find('#ii-refresh').on('click', () => me.reload());
 
+		this.page.main.find('.ii-nav-link[data-view]').on('click', function () {
+			me.set_view($(this).attr('data-view'));
+		});
+
+		this.page.main.find('#ii-home').on('click', () => {
+			if (me.ready) me.set_view('overview');
+		});
+
+		this.page.main.find('#ii-sb-toggle').on('click', () => {
+			const collapsed = !me.page.main.find('.ii-root').hasClass('ii-sb-collapsed');
+			try { localStorage.setItem('ii_sidebar_collapsed', collapsed ? '1' : '0'); } catch (e) { /* storage blocked */ }
+			me.apply_sidebar_state(collapsed);
+		});
+
 		this.page.main.find('#ii-truefs').on('click', () => me.toggle_browser_fullscreen());
-		$(document).on(
-			'fullscreenchange.iinsights webkitfullscreenchange.iinsights mozfullscreenchange.iinsights MSFullscreenChange.iinsights',
-			() => me.on_browser_fs_change()
-		);
-
-		// Group button: single-view → open directly; multi-view → toggle its menu.
-		this.page.main.find('.ii-group-btn').on('click', function (e) {
-			e.stopPropagation();
-			const $group = $(this).closest('.ii-group');
-			const direct = $(this).data('view');
-			if (direct) {
-				me.close_menus();
-				me.set_view(direct);
-				return;
-			}
-			const wasOpen = $group.hasClass('open');
-			me.close_menus();
-			$group.toggleClass('open', !wasOpen);
-		});
-
-		// Menu item → open that view.
-		this.page.main.find('.ii-menu-item').on('click', function (e) {
-			e.stopPropagation();
-			me.close_menus();
-			me.set_view($(this).data('view'));
-		});
-
-		// Click anywhere else closes any open dropdown.
-		if (!isoft_insights._menu_bound) {
-			isoft_insights._menu_bound = true;
-			$(document).on('click.iimenu', () => {
-				if (isoft_insights.app) isoft_insights.app.close_menus();
-			});
-		}
+		$(document)
+			.off('.iinsights')
+			.on(
+				'fullscreenchange.iinsights webkitfullscreenchange.iinsights mozfullscreenchange.iinsights MSFullscreenChange.iinsights',
+				() => isoft_insights.app && isoft_insights.app.on_browser_fs_change()
+			);
 	}
 
-	close_menus() {
-		this.page.main.find('.ii-group').removeClass('open');
-	}
-
-	set_maximized(active) {
-		const $root = this.page.main.find('.ii-root');
-		$root.toggleClass('ii-maximized', active);
-		$('body').toggleClass('ii-maximized-lock', active);
-		this.page.main.find('#ii-fullscreen i')
-			.toggleClass('fa-expand', !active)
-			.toggleClass('fa-compress', active);
-		setTimeout(() => window.dispatchEvent(new Event('resize')), 80);
+	apply_sidebar_state(collapsed) {
+		const $m = this.page.main;
+		$m.find('.ii-root').toggleClass('ii-sb-collapsed', !!collapsed);
+		const label = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+		const $t = $m.find('#ii-sb-toggle').attr('title', label);
+		$t.find('.ii-nav-label').text(collapsed ? 'Expand' : 'Collapse');
+		$t.find('i')
+			.toggleClass('fa-angle-double-left', !collapsed)
+			.toggleClass('fa-angle-double-right', !!collapsed);
+		// Charts size themselves off their container: re-measure now and again
+		// once the 180ms width transition has settled.
+		window.dispatchEvent(new Event('resize'));
+		setTimeout(() => window.dispatchEvent(new Event('resize')), 220);
 	}
 
 	is_browser_fs() {
@@ -340,23 +332,13 @@ isoft_insights.App = class App {
 	}
 
 	on_browser_fs_change() {
+		// The shell already fills the viewport, so there is nothing to maximise;
+		// just keep the control in step and let charts re-measure.
 		const active = this.is_browser_fs();
-		this.page.main.find('#ii-truefs i')
-			.toggleClass('fa-arrows-alt', !active)
-			.toggleClass('fa-compress', active);
-		// Auto-maximize the dashboard while in browser fullscreen so it fills the screen,
-		// and restore the prior state on exit (only undo what we auto-applied).
-		if (active) {
-			if (!this.page.main.find('.ii-root').hasClass('ii-maximized')) {
-				this._fs_auto_max = true;
-				this.set_maximized(true);
-			}
-		} else if (this._fs_auto_max) {
-			this._fs_auto_max = false;
-			this.set_maximized(false);
-		} else {
-			setTimeout(() => window.dispatchEvent(new Event('resize')), 80);
-		}
+		const $b = this.page.main.find('#ii-truefs');
+		$b.find('i').toggleClass('fa-arrows-alt', !active).toggleClass('fa-compress', active);
+		$b.find('.ii-nav-label').text(active ? 'Exit fullscreen' : 'Fullscreen');
+		setTimeout(() => window.dispatchEvent(new Event('resize')), 80);
 	}
 
 	maybe_reload_custom() {
@@ -395,7 +377,7 @@ isoft_insights.App = class App {
 
 	show_lock(msg) {
 		this.page.main.find('#ii-content').hide();
-		this.page.main.find('.ii-tabs, .ii-filters').css('visibility', 'hidden');
+		this.page.main.find('.ii-nav, .ii-filters, .ii-sb-foot').css('visibility', 'hidden');
 		if (msg) this.page.main.find('#ii-lock-msg').text(msg);
 		this.page.main.find('#ii-lock').show();
 	}
@@ -406,15 +388,14 @@ isoft_insights.App = class App {
 		if (!view) return;
 		this.state.active_view = key;
 
-		// Highlight the group that owns this view + the active menu item.
-		this.page.main.find('.ii-group-btn').removeClass('active');
-		this.page.main.find('.ii-menu-item').removeClass('active');
+		const esc = frappe.utils.escape_html;
+		this.page.main.find('.ii-nav-link[data-view]').removeClass('active');
+		this.page.main.find(`.ii-nav-link[data-view="${key}"]`).addClass('active');
 		const group = isoft_insights.GROUPS.find((g) => (g.views || []).indexOf(key) !== -1);
-		if (group) {
-			const $g = this.page.main.find(`.ii-group[data-group="${group.key}"]`);
-			$g.find('.ii-group-btn').addClass('active');
-			$g.find(`.ii-menu-item[data-view="${key}"]`).addClass('active');
-		}
+		this.page.main.find('#ii-crumb').text(group && group.views.length > 1 ? group.label : '');
+		this.page.main.find('#ii-title').html(
+			`<i class="fa ${view.icon} ii-i-${view.tone || 'muted'}"></i><span>${esc(view.label)}</span>`
+		);
 
 		// Settings has no global filters; views with their own time controls
 		// (matrix, receivables) hide the global period selector but keep company.
@@ -425,6 +406,7 @@ isoft_insights.App = class App {
 
 		const $c = this.$content();
 		$c.html('<div class="ii-loading"><i class="fa fa-spinner fa-spin"></i> Loading…</div>');
+		this.page.main.find('.ii-main').scrollTop(0);
 
 		const url = `/assets/isoft_insights/js/components/${view.file}.js`;
 		frappe.require(url, () => {
@@ -461,176 +443,248 @@ isoft_insights.App = class App {
 	// ---- styles ----
 	inject_styles() {
 		if (document.getElementById('isoft-insights-styles')) return;
+
+		// Icon-rail layout, written once and applied in two places: when the user
+		// collapses the sidebar, and below 1024px where the rail is forced.
+		const rail = (s) => `
+		${s} .ii-brand { justify-content: center; padding-left: .4rem; padding-right: .4rem; }
+		${s} .ii-brand-meta, ${s} .ii-nav-label { display: none; }
+		${s} .ii-nav-heading { height: 1px; padding: 0; margin: .45rem .2rem; background: var(--ii-border); }
+		${s} .ii-nav-link, ${s} .ii-company-wrap { justify-content: center; padding-left: .4rem; padding-right: .4rem; gap: 0; }
+		${s} .ii-company-wrap > i { width: auto; }
+		/* The select stays clickable as an invisible layer over the icon, so the
+		   company can still be switched from the rail. */
+		${s} .ii-company-select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; }`;
+
 		const css = `
 		<style id="isoft-insights-styles">
+		body.ii-page header.navbar,
+		body.ii-page .navbar.navbar-expand,
+		body.ii-page .page-head { display: none !important; }
+		body.ii-page .layout-main-section-wrapper { margin-top: 0 !important; }
+		body.ii-page .page-container { padding-top: 0 !important; }
+		body.ii-page .main-section { padding-top: 0 !important; }
+
+		/* ---- Tokens: Invenza's slate palette. Only these two blocks differ between
+		   light and dark; dark follows Frappe's [data-theme="dark"] on <html>. ---- */
 		.ii-root {
-			--ii-primary: #2563eb; --ii-primary-dark: #1e40af; --ii-accent: #3b82f6;
-			--ii-bg: #f6f8fb; --ii-card: #ffffff; --ii-border: #e6eaf0; --ii-text: #1f2937; --ii-muted: #6b7280;
-			font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-			color: var(--ii-text); padding-bottom: 40px;
+			--ii-sb: 224px;
+			--ii-page: #f1f5f9; --ii-side: #ffffff; --ii-card: #ffffff;
+			--ii-bg: #f1f5f9; --ii-bg-2: #f8fafc;
+			--ii-border: #e2e8f0; --ii-border-2: #cbd5e1;
+			--ii-text: #0f172a; --ii-text-2: #334155; --ii-muted: #64748b; --ii-faint: #94a3b8;
+			--ii-primary: #2563eb; --ii-primary-dark: #1d4ed8; --ii-accent: #3b82f6; --ii-accent-ink: #2563eb;
+			--ii-soft: #eff6ff; --ii-soft-solid: #eff6ff; --ii-ring: rgba(59,130,246,0.28);
+			--ii-ok: #15803d; --ii-warn: #b45309; --ii-orange: #c2410c; --ii-bad: #b91c1c;
+			--ii-violet: #8b5cf6; --ii-teal: #0f8b8d;
+			font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+			color: var(--ii-text);
 		}
-		/* Modern sticky top navbar */
-		.ii-bar {
-			display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-			position: sticky; top: 0; z-index: 30; margin-top: 10px;
-			background: var(--ii-card); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
-			border: 1px solid var(--ii-border); border-radius: 14px;
-			padding: 9px 14px; margin-bottom: 18px;
-			box-shadow: 0 6px 22px rgba(17, 24, 39, 0.07);
+		[data-theme="dark"] .ii-root {
+			--ii-page: #0b1220; --ii-side: #131c2e; --ii-card: #1e293b;
+			--ii-bg: #263244; --ii-bg-2: #182236;
+			--ii-border: #334155; --ii-border-2: #475569;
+			--ii-text: #f1f5f9; --ii-text-2: #cbd5e1; --ii-muted: #94a3b8; --ii-faint: #64748b;
+			--ii-primary: #3b82f6; --ii-primary-dark: #2563eb; --ii-accent: #60a5fa; --ii-accent-ink: #60a5fa;
+			--ii-soft: rgba(96,165,250,0.16); --ii-soft-solid: #293d5a; --ii-ring: rgba(96,165,250,0.35);
+			--ii-ok: #4ade80; --ii-warn: #fbbf24; --ii-orange: #fb923c; --ii-bad: #f87171;
+			--ii-violet: #a78bfa; --ii-teal: #2dd4bf;
 		}
-		.ii-brand { display: flex; align-items: center; gap: 10px; padding-right: 14px; border-right: 1px solid var(--ii-border); }
+		.ii-root.ii-sb-collapsed { --ii-sb: 62px; }
+
+		.ii-i-item  { color: var(--ii-accent) !important; }
+		.ii-i-stock { color: var(--ii-warn) !important; }
+		.ii-i-money { color: var(--ii-ok) !important; }
+		.ii-i-buy   { color: var(--ii-violet) !important; }
+		.ii-i-perf  { color: var(--ii-teal) !important; }
+		.ii-i-alert { color: var(--ii-bad) !important; }
+		.ii-i-muted { color: var(--ii-faint) !important; }
+
+		/* ---- Sidebar ---- */
+		.ii-sidebar {
+			position: fixed; top: 0; left: 0; bottom: 0; width: var(--ii-sb); z-index: 1020;
+			display: flex; flex-direction: column; overflow: hidden;
+			background: var(--ii-side); color: var(--ii-text); border-right: 1px solid var(--ii-border);
+			transition: width .18s cubic-bezier(.4,0,.2,1);
+		}
+		.ii-brand {
+			display: flex; align-items: center; gap: .6rem; flex-shrink: 0;
+			min-height: 58px; padding: .6rem .75rem; border-bottom: 1px solid var(--ii-border);
+		}
 		.ii-brand-logo {
-			width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
-			color: #fff; font-size: 16px; background: linear-gradient(135deg, var(--ii-primary), var(--ii-accent));
-			box-shadow: 0 4px 11px rgba(37, 99, 235, 0.38);
+			width: 34px; height: 34px; flex-shrink: 0; border: 0; border-radius: 9px; cursor: pointer;
+			display: flex; align-items: center; justify-content: center;
+			background: var(--ii-primary); color: #fff; font-size: 16px;
+			transition: filter .2s, transform .2s;
 		}
-		.ii-brand-meta { display: flex; flex-direction: column; line-height: 1.15; }
-		.ii-brand-name { font-weight: 800; font-size: 14px; letter-spacing: .2px; color: var(--ii-text); white-space: nowrap; }
-		.ii-brand-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--ii-muted); }
-		.ii-tabs { display: flex; gap: 6px; flex-wrap: wrap; flex: 1 1 auto; }
+		.ii-brand-logo:hover { filter: brightness(1.08); transform: scale(1.06); }
+		.ii-brand-meta { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; white-space: nowrap; }
+		.ii-brand-name { font-size: 15px; font-weight: 700; letter-spacing: -.02em; color: var(--ii-text); }
+		.ii-brand-tag { font-size: 11px; font-weight: 500; letter-spacing: .03em; color: var(--ii-muted); }
+
+		.ii-nav {
+			flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+			padding: .6rem .5rem; display: flex; flex-direction: column; gap: 2px;
+		}
+		.ii-nav::-webkit-scrollbar { width: 6px; }
+		.ii-nav::-webkit-scrollbar-thumb { background: var(--ii-border); border-radius: 3px; }
+		.ii-nav-heading {
+			flex-shrink: 0; padding: .75rem .6rem .3rem; white-space: nowrap;
+			font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--ii-faint);
+		}
+		.ii-nav-heading:first-child { padding-top: .2rem; }
+		.ii-nav-sep { flex-shrink: 0; height: 1px; margin: .45rem .2rem; background: var(--ii-border); }
+		.ii-nav-link {
+			display: flex; align-items: center; gap: .7rem; width: 100%; flex-shrink: 0;
+			padding: .5rem .6rem; border: 0; border-radius: 9px; background: transparent;
+			color: var(--ii-text-2); font-size: 13px; font-weight: 500; text-align: left; cursor: pointer;
+			transition: background .15s, color .15s;
+		}
+		.ii-nav-link:hover { background: var(--ii-bg); color: var(--ii-text); }
+		.ii-nav-link.active { background: var(--ii-soft); color: var(--ii-accent-ink); font-weight: 600; }
+		.ii-nav-icon { width: 20px; flex-shrink: 0; text-align: center; font-size: 14px; }
+		.ii-nav-label { min-width: 0; line-height: 1.25; }
+		.ii-sidebar :focus { outline: none !important; }
+		.ii-sidebar button:focus-visible, .ii-sidebar select:focus-visible { box-shadow: 0 0 0 3px var(--ii-ring) !important; }
+
+		.ii-sb-foot { flex-shrink: 0; padding: .5rem; border-top: 1px solid var(--ii-border); }
+		.ii-company-wrap {
+			position: relative; display: flex; align-items: center; gap: .5rem; margin: 0;
+			padding: .45rem .6rem; border-radius: 9px; cursor: pointer; font-weight: normal;
+			background: var(--ii-bg-2); border: 1px solid var(--ii-border); color: var(--ii-text);
+		}
+		.ii-company-wrap > i { width: 20px; flex-shrink: 0; text-align: center; color: var(--ii-muted); }
+		.ii-company-select {
+			flex: 1; width: 100%; min-width: 0; border: 0; outline: none; cursor: pointer;
+			background: transparent; color: var(--ii-text); font-size: 12.5px; font-weight: 600; text-overflow: ellipsis;
+		}
+		.ii-company-select option { color: #0f172a; background: #fff; }
+		[data-theme="dark"] .ii-company-select option { color: #f1f5f9; background: #0f172a; }
+		${rail('.ii-root.ii-sb-collapsed')}
+
+		/* ---- Content area ---- */
+		.ii-main {
+			position: fixed; top: 0; right: 0; bottom: 0; left: var(--ii-sb);
+			overflow: auto; padding: 0 1.25rem 2rem; background: var(--ii-page);
+			transition: left .18s cubic-bezier(.4,0,.2,1);
+		}
+		.ii-bar {
+			position: sticky; top: 0; z-index: 30;
+			display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+			min-height: 58px; margin: 0 -1.25rem 1rem; padding: .6rem 1.25rem;
+			background: var(--ii-side); border-bottom: 1px solid var(--ii-border);
+		}
+		.ii-head { flex: 1 1 auto; min-width: 0; }
+		.ii-head-crumb { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--ii-faint); line-height: 1.3; }
+		.ii-head-crumb:empty { display: none; }
+		.ii-head-title { display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 700; letter-spacing: -.01em; color: var(--ii-text); line-height: 1.3; }
+		.ii-head-title i { font-size: 15px; }
 		.ii-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
-		/* Maximize mode: CSS overlay that keeps theme vars in scope and fills the viewport */
-		.ii-root.ii-maximized {
-			position: fixed; inset: 0; z-index: 1050; margin: 0; max-width: none;
-			background: var(--ii-bg); overflow: auto; padding: 18px 26px;
+		.ii-input {
+			width: auto !important; min-width: 120px; height: 32px !important; font-size: 13px !important;
+			border: 1px solid var(--ii-border-2) !important; border-radius: 6px !important;
+			background-color: var(--ii-card) !important; color: var(--ii-text) !important; box-shadow: none !important;
 		}
-		body.ii-maximized-lock { overflow: hidden; }
-		@media (max-width: 760px) { .ii-brand-meta { display: none; } }
-		.ii-input { width: auto !important; min-width: 120px; border: 1px solid var(--ii-border) !important; border-radius: 9px !important; height: 32px; }
-		.ii-refresh { border: 1px solid var(--ii-border) !important; border-radius: 9px !important; height: 32px; }
-		.ii-tab {
-			border: 1px solid var(--ii-border); background: var(--ii-card); color: var(--ii-muted);
-			border-radius: 10px; padding: 7px 13px; font-weight: 600; font-size: 13px; cursor: pointer;
-			transition: all .2s ease;
+		.ii-refresh {
+			height: 32px; min-width: 32px; display: inline-flex; align-items: center; justify-content: center;
+			border: 1px solid var(--ii-border-2) !important; border-radius: 6px !important;
+			background: var(--ii-card) !important; color: var(--ii-text-2) !important; box-shadow: none !important;
 		}
-		.ii-tab i { margin-right: 6px; }
-		.ii-tab:hover { color: var(--ii-primary); border-color: var(--ii-accent); transform: translateY(-1px); }
-		.ii-tab.active { background: var(--ii-primary); color: #fff; border-color: var(--ii-primary); box-shadow: 0 6px 16px rgba(37,99,235,0.3); }
-
-		/* Grouped navbar dropdowns */
-		.ii-group { position: relative; }
-		.ii-caret-down { margin-left: 6px !important; margin-right: 0 !important; font-size: 11px; opacity: .8; transition: transform .2s ease; }
-		.ii-group.open .ii-caret-down { transform: rotate(180deg); }
-		.ii-group.open .ii-group-btn { border-color: var(--ii-accent); color: var(--ii-primary); }
-		.ii-group.open .ii-group-btn.active { color: #fff; }
-		.ii-group-menu {
-			position: absolute; top: calc(100% + 6px); left: 0; z-index: 50; min-width: 210px;
-			background: var(--ii-card); border: 1px solid var(--ii-border); border-radius: 12px;
-			box-shadow: 0 14px 34px rgba(17,24,39,0.16); padding: 6px; display: none;
-			animation: ii-menu-in .14s ease;
+		.ii-refresh:hover { border-color: var(--ii-faint) !important; color: var(--ii-text) !important; }
+		.ii-root .ii-input:focus, .ii-root .ii-input:focus-visible, .ii-root .ii-colf:focus {
+			outline: none !important; border-color: var(--ii-accent) !important; box-shadow: 0 0 0 3px var(--ii-ring) !important;
 		}
-		.ii-group.open .ii-group-menu { display: block; }
-		@keyframes ii-menu-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
-		.ii-menu-item {
-			display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
-			border: none; background: transparent; color: var(--ii-text); cursor: pointer;
-			border-radius: 8px; padding: 9px 11px; font-weight: 600; font-size: 13px; transition: background .12s ease;
-		}
-		.ii-menu-item i { width: 16px; text-align: center; color: var(--ii-muted); }
-		.ii-menu-item:hover { background: var(--ii-bg); }
-		.ii-menu-item.active { background: var(--ii-primary); color: #fff; }
-		.ii-menu-item.active i { color: #fff; }
-		[data-theme="dark"] .ii-group-menu { box-shadow: 0 14px 34px rgba(0,0,0,0.5); }
-
-		/* Replace the browser's dark default focus outline on navbar controls with a soft themed one */
-		.ii-bar .ii-input:focus, .ii-bar .ii-input:focus-visible {
-			outline: none !important;
-			border-color: var(--ii-accent) !important;
-			box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
-		}
-		.ii-tab:focus, .ii-group-btn:focus, .ii-refresh:focus, .ii-menu-item:focus,
-		.ii-tab:focus-visible, .ii-group-btn:focus-visible, .ii-refresh:focus-visible, .ii-menu-item:focus-visible {
-			outline: none !important;
-		}
-		.ii-tab:focus:not(.active), .ii-group-btn:focus:not(.active), .ii-refresh:focus {
-			box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
-			border-color: var(--ii-accent) !important;
-		}
+		.ii-refresh:focus, .ii-refresh:focus-visible { outline: none !important; box-shadow: 0 0 0 3px var(--ii-ring) !important; }
 
 		.ii-rowfilters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 		.ii-rowfilters label { font-size: 12px; color: var(--ii-muted); font-weight: 600; margin: 0 2px 0 6px; }
-		.ii-rowfilters .ii-input { min-width: 110px; background: var(--ii-card); }
 		.ii-search { min-width: 200px !important; }
 
-		.ii-matrix-wrap { overflow: auto; max-height: 70vh; border: 1px solid var(--ii-border); border-radius: 12px; }
+		.ii-matrix-wrap { overflow: auto; max-height: 70vh; border: 1px solid var(--ii-border); border-radius: 8px; }
 		.ii-matrix { border-collapse: collapse; font-size: 12.5px; width: 100%; min-width: 620px; }
-		.ii-matrix th, .ii-matrix td { padding: 9px 12px; white-space: nowrap; }
-		.ii-matrix thead th { position: sticky; top: 0; background: var(--ii-card); color: var(--ii-muted); text-transform: uppercase; font-size: 11px; letter-spacing: .4px; border-bottom: 2px solid var(--ii-border); text-align: right; z-index: 2; }
+		.ii-matrix th, .ii-matrix td { padding: 8px 12px; white-space: nowrap; }
+		.ii-matrix thead th { position: sticky; top: 0; background: var(--ii-bg-2); color: var(--ii-muted); text-transform: uppercase; font-size: 11px; font-weight: 600; letter-spacing: .04em; border-bottom: 1px solid var(--ii-border); text-align: right; z-index: 2; }
 		.ii-matrix .ii-sticky-col { position: sticky; left: 0; background: var(--ii-card); text-align: left; z-index: 1; border-right: 1px solid var(--ii-border); }
-		.ii-matrix thead th.ii-sticky-col { z-index: 4; }
+		.ii-matrix thead th.ii-sticky-col { z-index: 4; background: var(--ii-bg-2); }
 		.ii-matrix td { text-align: right; border-bottom: 1px solid var(--ii-border); font-variant-numeric: tabular-nums; }
 		.ii-matrix tbody tr:hover td { background: var(--ii-bg); }
-		.ii-matrix tbody tr:hover td.ii-sticky-col { background: #eef2ff; }
+		.ii-matrix tbody tr:hover td.ii-sticky-col { background: var(--ii-soft-solid); }
 		.ii-matrix .ii-total-col { font-weight: 700; }
-		.ii-matrix tfoot td { font-weight: 700; border-top: 2px solid var(--ii-border); background: var(--ii-card); position: sticky; bottom: 0; }
-		.ii-zero { color: #cbd5e1; }
+		.ii-matrix tfoot td { font-weight: 700; border-top: 1px solid var(--ii-border-2); background: var(--ii-bg-2); position: sticky; bottom: 0; }
+		.ii-zero { color: var(--ii-border-2); }
 
-		.ii-aging-badge { display:inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 700; }
-		.ii-age-current { background:#dcfce7; color:#166534; }
-		.ii-age-30 { background:#fef9c3; color:#854d0e; }
-		.ii-age-60 { background:#ffedd5; color:#9a3412; }
-		.ii-age-90 { background:#fee2e2; color:#991b1b; }
-		.ii-age-90p { background:#fecaca; color:#7f1d1d; }
-		.ii-totrow td { font-weight: 700; background: var(--ii-bg); }
-		.ii-filterrow td { padding: 4px 6px !important; border-bottom: 1px solid var(--ii-border); background: var(--ii-bg); }
+		.ii-aging-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+		.ii-age-current { background: #dcfce7; color: #166534; }
+		.ii-age-30 { background: #fef9c3; color: #854d0e; }
+		.ii-age-60 { background: #ffedd5; color: #9a3412; }
+		.ii-age-90 { background: #fee2e2; color: #991b1b; }
+		.ii-age-90p { background: #fecaca; color: #7f1d1d; }
+		[data-theme="dark"] .ii-age-current { background: rgba(74,222,128,0.14); color: #4ade80; }
+		[data-theme="dark"] .ii-age-30 { background: rgba(250,204,21,0.14); color: #facc15; }
+		[data-theme="dark"] .ii-age-60 { background: rgba(251,146,60,0.15); color: #fb923c; }
+		[data-theme="dark"] .ii-age-90 { background: rgba(248,113,113,0.15); color: #f87171; }
+		[data-theme="dark"] .ii-age-90p { background: rgba(239,68,68,0.24); color: #fca5a5; }
+		.ii-totrow td { font-weight: 700; background: var(--ii-bg-2); border-top: 1px solid var(--ii-border-2); }
+		.ii-filterrow td { padding: 4px 6px !important; border-bottom: 1px solid var(--ii-border); background: var(--ii-bg-2); }
 		.ii-colf { width: 100% !important; min-width: 56px; height: 28px !important; font-size: 12px !important; padding: 2px 8px !important;
-			border: 1px solid var(--ii-border) !important; border-radius: 7px !important; background: var(--ii-card); color: var(--ii-text); }
-		.ii-colf::placeholder { color: var(--ii-muted); opacity: .7; }
+			border: 1px solid var(--ii-border-2) !important; border-radius: 6px !important; background: var(--ii-card) !important; color: var(--ii-text) !important; box-shadow: none !important; }
+		.ii-colf::placeholder { color: var(--ii-faint); opacity: 1; }
 
 		.ii-cust-row { cursor: pointer; }
 		.ii-cust-row .ii-caret { transition: transform .2s; color: var(--ii-muted); margin-right: 7px; font-size: 11px; }
-		.ii-cust-row.open .ii-caret { transform: rotate(90deg); color: var(--ii-primary); }
-		.ii-cust-row.open > td { background: #eef2ff; }
-		.ii-detail-row > td { background: var(--ii-bg); padding: 4px 12px 14px !important; }
+		.ii-cust-row.open .ii-caret { transform: rotate(90deg); color: var(--ii-accent-ink); }
+		.ii-cust-row.open > td { background: var(--ii-soft-solid); }
+		.ii-detail-row > td { background: var(--ii-bg-2); padding: 4px 12px 14px !important; }
 		.ii-subtable { width: 100%; border-collapse: collapse; font-size: 12.5px; background: var(--ii-card); border: 1px solid var(--ii-border); border-radius: 8px; overflow: hidden; }
-		.ii-subtable th { text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: .4px; color: var(--ii-muted); padding: 8px 10px; border-bottom: 1px solid var(--ii-border); }
+		.ii-subtable th { text-align: left; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--ii-muted); padding: 8px 10px; border-bottom: 1px solid var(--ii-border); }
 		.ii-subtable td { padding: 8px 10px; border-bottom: 1px solid var(--ii-border); }
 		.ii-subtable tr:last-child td { border-bottom: none; }
-		.ii-overdue { color: #b91c1c; font-weight: 700; }
-		.ii-notdue { color: #166534; font-weight: 700; }
+		.ii-overdue { color: var(--ii-bad); font-weight: 700; }
+		.ii-notdue { color: var(--ii-ok); font-weight: 700; }
 
-		.ii-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 18px; }
+		/* ---- Flat cards ---- */
+		.ii-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px; }
 		.ii-kpi {
-			background: var(--ii-card); border: 1px solid var(--ii-border); border-radius: 14px; padding: 18px;
-			box-shadow: 0 4px 14px rgba(17,24,39,0.04); transition: all .2s ease; position: relative; overflow: hidden;
+			position: relative; overflow: hidden; padding: 16px 18px;
+			background: var(--ii-card); border: 1px solid var(--ii-border); border-radius: 10px;
 		}
-		.ii-kpi:hover { transform: translateY(-3px); box-shadow: 0 12px 26px rgba(17,24,39,0.10); }
-		.ii-kpi-label { font-size: 12px; color: var(--ii-muted); text-transform: uppercase; letter-spacing: .6px; font-weight: 600; }
-		.ii-kpi-value { font-size: 26px; font-weight: 800; margin-top: 6px; }
+		.ii-kpi-label { font-size: 11.5px; color: var(--ii-muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+		.ii-kpi-value { font-size: 24px; font-weight: 700; letter-spacing: -.02em; margin-top: 6px; font-variant-numeric: tabular-nums; }
 		.ii-kpi-icon {
-			position: absolute; right: 14px; top: 14px; width: 40px; height: 40px; border-radius: 10px;
-			display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px;
-			background: linear-gradient(135deg, var(--ii-primary), var(--ii-accent));
+			position: absolute; right: 14px; top: 14px; width: 36px; height: 36px; border-radius: 9px;
+			display: flex; align-items: center; justify-content: center; font-size: 16px;
+			background: var(--ii-soft); color: var(--ii-accent-ink);
 		}
-		.ii-kpi-delta { font-size: 12px; font-weight: 700; margin-top: 8px; }
-		.ii-up { color: #059669; } .ii-down { color: #dc2626; } .ii-flat { color: var(--ii-muted); }
+		.ii-kpi-delta { display: inline-block; font-size: 12px; font-weight: 600; margin-top: 8px; }
+		.ii-up { color: var(--ii-ok); } .ii-down { color: var(--ii-bad); } .ii-flat { color: var(--ii-muted); }
 
 		.ii-card {
-			background: var(--ii-card); border: 1px solid var(--ii-border); border-radius: 14px; padding: 18px;
-			box-shadow: 0 4px 14px rgba(17,24,39,0.04); margin-bottom: 18px;
+			background: var(--ii-card); border: 1px solid var(--ii-border); border-radius: 10px;
+			padding: 16px 18px; margin-bottom: 16px;
 		}
-		.ii-card-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
-		.ii-card-title .ii-pill { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--ii-muted); background: var(--ii-bg); padding: 3px 9px; border-radius: 20px; }
+		.ii-card-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--ii-text); }
+		.ii-card-title > i { color: var(--ii-muted); }
+		.ii-card-title .ii-pill { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--ii-muted); background: var(--ii-bg); padding: 3px 9px; border-radius: 999px; }
 
 		.ii-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-		.ii-table th { text-align: left; color: var(--ii-muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: .5px; padding: 10px 12px; border-bottom: 2px solid var(--ii-border); }
-		.ii-table td { padding: 11px 12px; border-bottom: 1px solid var(--ii-border); }
+		.ii-table th { text-align: left; color: var(--ii-muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: .04em; padding: 9px 12px; background: var(--ii-bg-2); border-bottom: 1px solid var(--ii-border); }
+		.ii-table td { padding: 10px 12px; border-bottom: 1px solid var(--ii-border); }
 		.ii-table tbody tr:hover { background: var(--ii-bg); }
 		.ii-table .ii-num { text-align: right; font-variant-numeric: tabular-nums; }
-		.ii-rank { display: inline-flex; width: 24px; height: 24px; border-radius: 50%; background: var(--ii-bg); color: var(--ii-primary); font-weight: 700; align-items: center; justify-content: center; font-size: 12px; }
+		.ii-rank { display: inline-flex; width: 24px; height: 24px; border-radius: 50%; background: var(--ii-soft); color: var(--ii-accent-ink); font-weight: 600; align-items: center; justify-content: center; font-size: 12px; }
 		.ii-bar-cell { min-width: 120px; }
-		.ii-bar-track { background: var(--ii-bg); border-radius: 6px; height: 8px; overflow: hidden; }
-		.ii-bar-fill { height: 8px; border-radius: 6px; background: linear-gradient(90deg, var(--ii-primary), var(--ii-accent)); }
+		.ii-bar-track { background: var(--ii-bg); border-radius: 999px; height: 6px; overflow: hidden; }
+		.ii-bar-fill { height: 6px; border-radius: 999px; background: var(--ii-primary); }
 
 		.ii-loading, .ii-empty { text-align: center; color: var(--ii-muted); padding: 60px 20px; font-size: 14px; }
 		.ii-empty i { font-size: 32px; display: block; margin-bottom: 10px; opacity: .5; }
 
 		.ii-lock { display: flex; align-items: center; justify-content: center; padding: 80px 20px; }
-		.ii-lock-box { text-align: center; max-width: 420px; }
-		.ii-lock-box i { font-size: 44px; color: var(--ii-muted); margin-bottom: 14px; }
-		.ii-lock-box h3 { font-weight: 700; }
-		.ii-lock-box p { color: var(--ii-muted); }
+		.ii-lock-box { text-align: center; max-width: 420px; background: var(--ii-card); border: 1px solid var(--ii-border); border-radius: 10px; padding: 28px 32px; }
+		.ii-lock-box i { font-size: 40px; color: var(--ii-faint); margin-bottom: 14px; }
+		.ii-lock-box h3 { font-weight: 700; color: var(--ii-text); }
+		.ii-lock-box p { color: var(--ii-muted); margin-bottom: 0; }
 
 		.ii-chart-wrap { width: 100%; }
 		.ii-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
@@ -639,38 +693,31 @@ isoft_insights.App = class App {
 		.ii-chk input { margin: 0; }
 		.ii-role-grid { display: flex; flex-wrap: wrap; gap: 8px; max-height: 230px; overflow-y: auto; padding: 4px; }
 		.ii-role-chip { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: 500; font-size: 12.5px;
-			border: 1px solid var(--ii-border); border-radius: 20px; padding: 5px 12px; cursor: pointer; transition: all .15s ease; background: var(--ii-card); }
+			border: 1px solid var(--ii-border-2); border-radius: 999px; padding: 4px 11px; cursor: pointer; transition: all .15s ease; background: var(--ii-card); color: var(--ii-text-2); }
 		.ii-role-chip:hover { border-color: var(--ii-accent); }
-		.ii-role-chip.on { background: var(--ii-primary); color: #fff; border-color: var(--ii-primary); }
+		.ii-role-chip.on { background: var(--ii-soft); color: var(--ii-accent-ink); border-color: var(--ii-accent); }
 		.ii-role-chip input { margin: 0; }
 
-		@media (max-width: 600px) {
-			.ii-header { flex-direction: column; align-items: flex-start; }
-			.ii-kpi-value { font-size: 22px; }
+		@media (max-width: 1024px) {
+			.ii-root { --ii-sb: 62px; }
+			.ii-root #ii-sb-toggle { display: none; }
+			${rail('.ii-root')}
 		}
-
-		/* --- Dark mode: follow Frappe's [data-theme="dark"] on <html> --- */
-		[data-theme="dark"] .ii-root {
-			--ii-bg: #1a1d23; --ii-card: #21242c; --ii-border: #32373f;
-			--ii-text: #e6e8ec; --ii-muted: #9aa1ac;
+		@media (max-width: 640px) {
+			.ii-main { padding: 0 .75rem 1.5rem; }
+			.ii-bar { margin: 0 -.75rem .75rem; padding: .6rem .75rem; }
+			.ii-kpi-value { font-size: 20px; }
 		}
-		[data-theme="dark"] .ii-zero { color: #4b5563; }
-		[data-theme="dark"] .ii-cust-row.open > td,
-		[data-theme="dark"] .ii-matrix tbody tr:hover td.ii-sticky-col { background: rgba(59,130,246,0.16); }
-		[data-theme="dark"] .ii-kpi:hover { box-shadow: 0 12px 26px rgba(0,0,0,0.45); }
-		[data-theme="dark"] .ii-card { box-shadow: 0 4px 14px rgba(0,0,0,0.30); }
-		[data-theme="dark"] .ii-bar { background: var(--ii-card); box-shadow: 0 6px 22px rgba(0,0,0,0.45); }
-		[data-theme="dark"] .ii-tab { background: var(--ii-card); }
 
 		/* ---- Shared financial-statement styles (DR / Balanço / Fluxos de Caixa) ----
 		   Defined here in the always-loaded shell so every statement looks identical
 		   no matter which one is opened first. Components add only their specifics. */
 		.bs-card { padding: 0; overflow: hidden; }
 		.bs-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
-			padding: 18px 20px; border-bottom: 1px solid var(--ii-border); flex-wrap: wrap; }
-		.bs-title { font-size: 16px; font-weight: 800; }
-		.bs-sub { font-size: 12px; color: var(--ii-muted); margin-top: 3px; text-transform: uppercase; letter-spacing: .4px; }
-		.bs-badge { font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 20px; white-space: nowrap; }
+			padding: 16px 18px; border-bottom: 1px solid var(--ii-border); flex-wrap: wrap; }
+		.bs-title { font-size: 15px; font-weight: 700; }
+		.bs-sub { font-size: 11.5px; color: var(--ii-muted); margin-top: 3px; text-transform: uppercase; letter-spacing: .04em; }
+		.bs-badge { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
 		.bs-badge.ok { background: #dcfce7; color: #166534; }
 		.bs-badge.bad { background: #fee2e2; color: #991b1b; }
 		.bs-warn { margin: 12px 20px 0; padding: 9px 12px; border-radius: 8px; font-size: 12.5px;
@@ -690,7 +737,7 @@ isoft_insights.App = class App {
 		.bs-table td.bs-prev { color: var(--ii-muted); }
 		.bs-table tr.bs-total td { font-weight: 800; background: var(--ii-bg); border-top: 1px solid var(--ii-border); }
 		.bs-table tr.bs-header td { font-weight: 700; text-transform: uppercase; font-size: 11.5px; letter-spacing: .5px;
-			color: var(--ii-primary); background: var(--ii-bg); padding-top: 12px; }
+			color: var(--ii-accent-ink); background: var(--ii-bg); padding-top: 12px; }
 		.bs-table td.bs-neg { color: #dc2626; }
 		.bs-table tbody tr:hover td { background: var(--ii-bg); }
 		.bs-sublabel { font-weight: 500; color: var(--ii-muted); font-size: 10px; }
@@ -709,7 +756,11 @@ isoft_insights.App = class App {
 		.bs-table tr.bs-drill-child td { background: rgba(37,99,235,0.035); font-size: 12.5px; }
 		.bs-table tr.bs-drill-child td.bs-label { color: var(--ii-text); }
 		[data-theme="dark"] .bs-table tr.bs-drill-child td { background: rgba(59,130,246,0.07); }
-		@media print { .ii-bar, .ii-rowfilters { display: none !important; } .bs-card { box-shadow: none; border: none; } }
+		@media print {
+			.ii-sidebar, .ii-bar, .ii-rowfilters { display: none !important; }
+			.ii-main { position: static !important; overflow: visible !important; padding: 0 !important; }
+			.bs-card { box-shadow: none; border: none; }
+		}
 		</style>`;
 		$('head').append(css);
 	}
