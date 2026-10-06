@@ -25,6 +25,7 @@ isoft_insights.VIEWS = [
 	{ key: 'payables',    label: 'Payables',    icon: 'fa-money',       tone: 'buy',   file: 'payables',    period: false },
 	{ key: 'balancesheet', label: 'Demonstração de Resultados', icon: 'fa-file-text-o', tone: 'perf', file: 'balancesheet', period: false },
 	{ key: 'balanco',     label: 'Balanço',     icon: 'fa-balance-scale', tone: 'item', file: 'balanco',    period: false },
+	{ key: 'balancete',   label: 'Balancete Geral', icon: 'fa-list-ol', tone: 'perf', file: 'balancete', period: false },
 	{ key: 'cashflow',    label: 'Fluxos de Caixa', icon: 'fa-exchange', tone: 'money', file: 'cashflow',  period: false },
 	{ key: 'settings',    label: 'Settings',    icon: 'fa-cog',         tone: 'muted', file: 'settings',    period: false }
 ];
@@ -32,9 +33,9 @@ isoft_insights.VIEWS = [
 // Sidebar sections. A multi-view group gets a heading; a single-view group is
 // a plain link under a separator. `views` reference isoft_insights.VIEWS keys.
 isoft_insights.GROUPS = [
-	{ key: 'sales',      label: 'Sales',      icon: 'fa-line-chart', views: ['overview', 'salesreport', 'customers', 'items', 'matrix', 'salesteam'] },
-	{ key: 'accounting', label: 'Accounting', icon: 'fa-book',       views: ['balancesheet', 'balanco', 'cashflow', 'receivables', 'payables'] },
-	{ key: 'settings',   label: 'Settings',   icon: 'fa-cog',        views: ['settings'] }
+	{ key: 'sales',      label: 'Sales',      icon: 'fa-line-chart', tone: 'money', views: ['overview', 'salesreport', 'customers', 'items', 'matrix', 'salesteam'] },
+	{ key: 'accounting', label: 'Accounting', icon: 'fa-book',       tone: 'item',  views: ['balancesheet', 'balanco', 'balancete', 'cashflow', 'receivables', 'payables'] },
+	{ key: 'settings',   label: 'Settings',   icon: 'fa-cog',        tone: 'muted', views: ['settings'] }
 ];
 
 // Hide the desk chrome (navbar + page head) only while this route is open.
@@ -171,18 +172,26 @@ isoft_insights.App = class App {
 	build_shell() {
 		const esc = frappe.utils.escape_html;
 		const viewById = (k) => isoft_insights.VIEWS.find((v) => v.key === k);
-		const link = (v) => `
-			<button type="button" class="ii-nav-link" data-view="${v.key}" title="${esc(v.label)}">
+		const link = (v, kid) => `
+			<button type="button" class="ii-nav-link${kid ? ' ii-nav-kid' : ''}" data-view="${v.key}" title="${esc(v.label)}">
 				<span class="ii-nav-icon"><i class="fa ${v.icon} ii-i-${v.tone || 'muted'}"></i></span>
 				<span class="ii-nav-label">${esc(v.label)}</span>
 			</button>`;
+		// A group is one collapsible item, not six loose links: twelve views listed
+		// flat is a wall. In the rail the children open BESIDE the icon instead.
 		const nav = isoft_insights.GROUPS.map((g) => {
 			const views = (g.views || []).map(viewById).filter(Boolean);
 			if (!views.length) return '';
-			const head = views.length > 1
-				? `<div class="ii-nav-heading"><span class="ii-nav-label">${esc(g.label)}</span></div>`
-				: '<div class="ii-nav-sep"></div>';
-			return head + views.map(link).join('');
+			if (views.length === 1) return '<div class="ii-nav-sep"></div>' + link(views[0]);
+			return `
+				<div class="ii-nav-group" data-group="${g.key}">
+					<button type="button" class="ii-nav-link ii-nav-head" title="${esc(g.label)}">
+						<span class="ii-nav-icon"><i class="fa ${g.icon} ii-i-${g.tone || 'muted'}"></i></span>
+						<span class="ii-nav-label">${esc(g.label)}</span>
+						<i class="fa fa-angle-down ii-nav-caret" aria-hidden="true"></i>
+					</button>
+					<div class="ii-nav-kids">${views.map((v) => link(v, true)).join('')}</div>
+				</div>`;
 		}).join('');
 
 		this.page.main.html(`
@@ -277,8 +286,24 @@ isoft_insights.App = class App {
 		this.page.main.find('#ii-refresh').on('click', () => me.reload());
 
 		this.page.main.find('.ii-nav-link[data-view]').on('click', function () {
+			me.close_flyouts();
 			me.set_view($(this).attr('data-view'));
 		});
+
+		this.page.main.find('.ii-nav-head').on('click', function (e) {
+			e.stopPropagation();
+			const $group = $(this).closest('.ii-nav-group');
+			if (me.is_rail()) me.open_flyout($group);
+			else $group.toggleClass('open');
+		});
+
+		// A click anywhere else closes an open rail flyout.
+		if (!isoft_insights._flyout_bound) {
+			isoft_insights._flyout_bound = true;
+			$(document).on('click.iiflyout', () => {
+				if (isoft_insights.app) isoft_insights.app.close_flyouts();
+			});
+		}
 
 		this.page.main.find('#ii-home').on('click', () => {
 			if (me.ready) me.set_view('overview');
@@ -308,10 +333,32 @@ isoft_insights.App = class App {
 		$t.find('i')
 			.toggleClass('fa-angle-double-left', !collapsed)
 			.toggleClass('fa-angle-double-right', !!collapsed);
-		// Charts size themselves off their container: re-measure now and again
-		// once the 180ms width transition has settled.
-		window.dispatchEvent(new Event('resize'));
-		setTimeout(() => window.dispatchEvent(new Event('resize')), 220);
+		this.close_flyouts();
+		// No synthetic resize event, and the width change is instant (see the
+		// stylesheet): frappe-charts redraws from its own ResizeObserver, and
+		// driving it a second time mid-draw makes it throw removeChild.
+	}
+
+	is_rail() {
+		return this.page.main.find('.ii-root').hasClass('ii-sb-collapsed') ||
+			(window.matchMedia && window.matchMedia('(max-width: 1024px)').matches);
+	}
+
+	close_flyouts() {
+		this.page.main.find('.ii-nav-group.flyout').removeClass('flyout');
+	}
+
+	// In the rail there is no room for a label under a 62px icon, so a group opens
+	// as a small menu beside it. Fixed-positioned, so the nav cannot clip it.
+	open_flyout($group) {
+		const was_open = $group.hasClass('flyout');
+		this.close_flyouts();
+		if (was_open) return;
+		$group.addClass('flyout');
+		const $kids = $group.find('.ii-nav-kids');
+		const top = $group[0].getBoundingClientRect().top;
+		const height = $kids.outerHeight() || 0;
+		$kids.css('top', Math.round(Math.max(8, Math.min(top, window.innerHeight - height - 12))) + 'px');
 	}
 
 	is_browser_fs() {
@@ -389,9 +436,15 @@ isoft_insights.App = class App {
 		this.state.active_view = key;
 
 		const esc = frappe.utils.escape_html;
-		this.page.main.find('.ii-nav-link[data-view]').removeClass('active');
+		this.page.main.find('.ii-nav-link').removeClass('active active-group');
 		this.page.main.find(`.ii-nav-link[data-view="${key}"]`).addClass('active');
 		const group = isoft_insights.GROUPS.find((g) => (g.views || []).indexOf(key) !== -1);
+		// Open the group that owns the view, so the current screen is never hidden
+		// inside a closed group.
+		if (group) {
+			const $g = this.page.main.find(`.ii-nav-group[data-group="${group.key}"]`).addClass('open');
+			$g.children('.ii-nav-head').addClass('active-group');
+		}
 		this.page.main.find('#ii-crumb').text(group && group.views.length > 1 ? group.label : '');
 		this.page.main.find('#ii-title').html(
 			`<i class="fa ${view.icon} ii-i-${view.tone || 'muted'}"></i><span>${esc(view.label)}</span>`
@@ -449,7 +502,18 @@ isoft_insights.App = class App {
 		const rail = (s) => `
 		${s} .ii-brand { justify-content: center; padding-left: .4rem; padding-right: .4rem; }
 		${s} .ii-brand-meta, ${s} .ii-nav-label { display: none; }
-		${s} .ii-nav-heading { height: 1px; padding: 0; margin: .45rem .2rem; background: var(--ii-border); }
+		${s} .ii-nav-caret { display: none; }
+		/* A group opens beside its icon, not under it: a stack of unlabelled
+		   children in a 62px rail says nothing. */
+		${s} .ii-nav-group > .ii-nav-kids { display: none; max-height: none; }
+		${s} .ii-nav-group.flyout > .ii-nav-kids {
+			display: block; position: fixed; left: calc(var(--ii-sb) + 6px); z-index: 1030;
+			min-width: 214px; padding: 6px; border-radius: 10px;
+			background: var(--ii-card); border: 1px solid var(--ii-border); box-shadow: 0 12px 28px rgba(15,23,42,.14);
+		}
+		[data-theme="dark"] ${s} .ii-nav-group.flyout > .ii-nav-kids { box-shadow: 0 12px 28px rgba(0,0,0,.5); }
+		${s} .ii-nav-group.flyout > .ii-nav-kids .ii-nav-label { display: block; }
+		${s} .ii-nav-group.flyout > .ii-nav-kids .ii-nav-link { justify-content: flex-start; gap: .7rem; padding-left: .6rem; padding-right: .8rem; }
 		${s} .ii-nav-link, ${s} .ii-company-wrap { justify-content: center; padding-left: .4rem; padding-right: .4rem; gap: 0; }
 		${s} .ii-company-wrap > i { width: auto; }
 		/* The select stays clickable as an invisible layer over the icon, so the
@@ -505,7 +569,6 @@ isoft_insights.App = class App {
 			position: fixed; top: 0; left: 0; bottom: 0; width: var(--ii-sb); z-index: 1020;
 			display: flex; flex-direction: column; overflow: hidden;
 			background: var(--ii-side); color: var(--ii-text); border-right: 1px solid var(--ii-border);
-			transition: width .18s cubic-bezier(.4,0,.2,1);
 		}
 		.ii-brand {
 			display: flex; align-items: center; gap: .6rem; flex-shrink: 0;
@@ -528,11 +591,16 @@ isoft_insights.App = class App {
 		}
 		.ii-nav::-webkit-scrollbar { width: 6px; }
 		.ii-nav::-webkit-scrollbar-thumb { background: var(--ii-border); border-radius: 3px; }
-		.ii-nav-heading {
-			flex-shrink: 0; padding: .75rem .6rem .3rem; white-space: nowrap;
-			font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; color: var(--ii-faint);
-		}
-		.ii-nav-heading:first-child { padding-top: .2rem; }
+		.ii-nav-caret { margin-left: auto; font-size: 11px; color: var(--ii-faint); transition: transform .18s; }
+		.ii-nav-group.open > .ii-nav-head .ii-nav-caret { transform: rotate(180deg); }
+		.ii-nav-head.active-group { color: var(--ii-text); font-weight: 600; }
+		/* Collapsible group. A max-height transition, not the 0fr->1fr grid trick:
+		   the children are siblings here and that trick needs one wrapper child. */
+		.ii-nav-kids { max-height: 0; overflow: hidden; transition: max-height .2s ease; }
+		.ii-nav-group.open > .ii-nav-kids { max-height: 420px; }
+		.ii-nav-kid { padding-left: 1.7rem; font-size: 12.5px; color: var(--ii-muted); }
+		.ii-nav-kid .ii-nav-icon { font-size: 12px; }
+		.ii-nav-kid.active { color: var(--ii-accent-ink); }
 		.ii-nav-sep { flex-shrink: 0; height: 1px; margin: .45rem .2rem; background: var(--ii-border); }
 		.ii-nav-link {
 			display: flex; align-items: center; gap: .7rem; width: 100%; flex-shrink: 0;
@@ -566,7 +634,10 @@ isoft_insights.App = class App {
 		.ii-main {
 			position: fixed; top: 0; right: 0; bottom: 0; left: var(--ii-sb);
 			overflow: auto; padding: 0 1.25rem 2rem; background: var(--ii-page);
-			transition: left .18s cubic-bezier(.4,0,.2,1);
+			/* Collapsing is INSTANT. An animated width resizes the chart containers
+			   over ~10 frames and frappe-charts redraws on each one, which makes its
+			   ResizeObserver remove nodes an earlier draw already replaced
+			   (NotFoundError: removeChild). Verified both ways. */
 		}
 		.ii-bar {
 			position: sticky; top: 0; z-index: 30;

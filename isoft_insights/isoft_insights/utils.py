@@ -2337,3 +2337,308 @@ def drill_cash_flow(row_code, account=None, fiscal_year=None, company=None):
 	if line["kind"] == "cash_close":
 		return {"rows": _drill_nodes(accounts, "magnitude", polarity, None, end, None, prev_end)}
 	return {"rows": _drill_nodes(accounts, "magnitude", polarity, start, end, prev_start, prev_end)}
+
+
+# --------------------------------------------------------------------------- #
+# Balancete Geral (PGC Angola trial balance)
+# --------------------------------------------------------------------------- #
+#
+# One row per account of the company's own chart of accounts -- nothing is
+# hard-coded here, the tree and the numbering come straight from tabAccount.
+#
+# Columns mirror the Angolan balancete:
+#   Conta | Descrição | Mov. Débito | Mov. Crédito | Saldo Débito | Saldo Crédito
+#
+# Group accounts carry the rolled-up movement of everything below them, and the
+# saldo is the net of the two movement columns placed on its natural side. With
+# "saldo inicial" on, two extra columns hold the balance carried into the period
+# and the saldo becomes opening + movement.
+#
+# After every PGC class (the first digit of the account number) the report emits
+# "Soma Líquida" (the four columns summed over the class' top-level accounts) and
+# "Soma Saldos" (just the two balance columns), then the same pair for the whole
+# report. The single-digit class account itself is not printed as a row -- those
+# two lines are its total.
+
+BALANCETE_MAX_ENTRIES = 500
+
+
+def _balancete_dates(from_date, to_date):
+	"""Resolve the period, defaulting to the fiscal year that holds `to_date`."""
+	end = getdate(to_date or today())
+	if from_date:
+		start = getdate(from_date)
+	else:
+		fy = frappe.db.sql(
+			"""select year_start_date from `tabFiscal Year`
+			   where %s between year_start_date and year_end_date
+			   order by year_start_date desc limit 1""",
+			end,
+		)
+		start = getdate(fy[0][0]) if fy else getdate("%d-01-01" % end.year)
+	if start > end:
+		start, end = end, start
+	return start, end
+
+
+def _balancete_movements(company, start, end, voucher_type, opening):
+	"""Debit/credit per account, either inside the period or before it."""
+	conds = ["company = %(company)s", "ifnull(is_cancelled, 0) = 0"]
+	args = {"company": company, "start": start, "end": end}
+	if voucher_type:
+		conds.append("voucher_type = %(voucher_type)s")
+		args["voucher_type"] = voucher_type
+	conds.append("posting_date < %(start)s" if opening else "posting_date between %(start)s and %(end)s")
+
+	return frappe.db.sql(
+		"""select account, sum(debit) as debit, sum(credit) as credit
+		   from `tabGL Entry` where {conds} group by account""".format(conds=" and ".join(conds)),
+		args,
+		as_dict=True,
+	)
+
+
+def _split_saldo(net):
+	"""Put a net balance on its natural side: positive = débito, negative = crédito."""
+	net = flt(net, 2)
+	if net > 0:
+		return net, 0.0
+	if net < 0:
+		return 0.0, -net
+	return 0.0, 0.0
+
+
+@frappe.whitelist()
+def get_balancete_geral(
+	from_date=None,
+	to_date=None,
+	company=None,
+	voucher_type=None,
+	only_with_movement=1,
+	include_opening=0,
+	max_depth=0,
+):
+	"""Balancete Geral over the company's chart of accounts for a date range."""
+	_assert_access()
+
+	company = company or frappe.defaults.get_user_default("Company")
+	if not company:
+		frappe.throw(_("Select a company to run the Balancete Geral."))
+
+	start, end = _balancete_dates(from_date, to_date)
+	only_with_movement = cint(only_with_movement)
+	include_opening = cint(include_opening)
+	max_depth = cint(max_depth)
+	voucher_type = (voucher_type or "").strip() or None
+
+	accounts = frappe.db.sql(
+		"""select name, account_number, account_name, is_group, parent_account, root_type
+		   from tabAccount where company = %s""",
+		company,
+		as_dict=True,
+	)
+
+	base = {
+		"company": company,
+		"from_date": str(start),
+		"to_date": str(end),
+		"currency": _company_currency(company),
+		"voucher_type": voucher_type or "",
+		"include_opening": include_opening,
+		"only_with_movement": only_with_movement,
+		"max_depth": max_depth,
+		"voucher_types": _balancete_voucher_types(company),
+	}
+	if not accounts:
+		return dict(base, rows=[], totals={}, depth=0)
+
+	by_name = {a.name: a for a in accounts}
+
+	# Roll every posted movement up through the whole parent chain, so a group
+	# account shows the total of its sub-tree without a second query.
+	def rollup(raw):
+		totals = {}
+		for row in raw:
+			node = by_name.get(row.account)
+			while node:
+				bucket = totals.setdefault(node.name, [0.0, 0.0])
+				bucket[0] += flt(row.debit)
+				bucket[1] += flt(row.credit)
+				node = by_name.get(node.parent_account)
+		return totals
+
+	movement = rollup(_balancete_movements(company, start, end, voucher_type, False))
+	opening = rollup(_balancete_movements(company, start, end, voucher_type, True)) if include_opening else {}
+
+	# Children sorted by account number: inside one parent the numbers share a
+	# prefix, so a plain string sort is the PGC order.
+	children = {}
+	roots = []
+	for acc in accounts:
+		parent = (acc.parent_account or "").strip()
+		if parent and parent in by_name:
+			children.setdefault(parent, []).append(acc)
+		else:
+			roots.append(acc)
+	sort_key = lambda a: ((a.account_number or "").strip(), a.account_name or "")
+	for kids in children.values():
+		kids.sort(key=sort_key)
+	roots.sort(key=sort_key)
+
+	def class_of(root):
+		"""PGC class of a root account: the first digit of its number."""
+		return ((root.account_number or "").strip() or (root.account_name or "?"))[:1]
+
+	def figures(acc):
+		mov_d, mov_c = movement.get(acc.name, (0.0, 0.0))
+		open_d, open_c = opening.get(acc.name, (0.0, 0.0))
+		open_debit, open_credit = _split_saldo(open_d - open_c)
+		net = (open_d - open_c) + (mov_d - mov_c) if include_opening else (mov_d - mov_c)
+		saldo_debit, saldo_credit = _split_saldo(net)
+		return {
+			"opening_debit": open_debit,
+			"opening_credit": open_credit,
+			"debit": flt(mov_d, 2),
+			"credit": flt(mov_c, 2),
+			"saldo_debit": saldo_debit,
+			"saldo_credit": saldo_credit,
+		}
+
+	def moved(acc):
+		mov = movement.get(acc.name)
+		if mov and (abs(mov[0]) >= 0.005 or abs(mov[1]) >= 0.005):
+			return True
+		op = opening.get(acc.name)
+		return bool(op and (abs(op[0]) >= 0.005 or abs(op[1]) >= 0.005))
+
+	SUM_FIELDS = ("opening_debit", "opening_credit", "debit", "credit", "saldo_debit", "saldo_credit")
+	rows = []
+	deepest = [0]
+
+	def emit(acc, level):
+		if only_with_movement and not moved(acc):
+			return
+		# `deepest` is the depth of the whole report, not of what survived the
+		# "Nível" cut, so the level selector keeps offering every level.
+		deepest[0] = max(deepest[0], level)
+		kids = children.get(acc.name) or []
+		if not max_depth or level < max_depth:
+			rows.append(dict(
+				{
+					"kind": "account",
+					"account": acc.name,
+					"number": (acc.account_number or "").strip(),
+					"name": acc.account_name,
+					"level": level,
+					"is_group": cint(acc.is_group),
+					"has_children": bool(kids),
+					"root_type": acc.root_type,
+				},
+				**figures(acc)
+			))
+		for kid in kids:
+			emit(kid, level + 1)
+
+	def summed(nodes):
+		total = dict.fromkeys(SUM_FIELDS, 0.0)
+		for node in nodes:
+			vals = figures(node)
+			for field in SUM_FIELDS:
+				total[field] = flt(total[field] + vals[field], 2)
+		return total
+
+	# Group the roots into PGC classes; a single-digit class account is not a row
+	# of its own, its children take its place and its total becomes the Soma.
+	classes = []
+	for root in roots:
+		key = class_of(root)
+		is_class_root = len((root.account_number or "").strip()) == 1
+		tops = (children.get(root.name) or []) if is_class_root else [root]
+		if classes and classes[-1]["key"] == key:
+			classes[-1]["tops"].extend(tops)
+		else:
+			classes.append({"key": key, "tops": list(tops)})
+
+	grand_tops = []
+	for group in classes:
+		tops = sorted(group["tops"], key=sort_key)
+		visible = [t for t in tops if not only_with_movement or moved(t)]
+		if not visible:
+			continue
+		before = len(rows)
+		for top in visible:
+			emit(top, 0)
+		if len(rows) == before:
+			continue
+
+		grand_tops.extend(visible)
+		totals = summed(visible)
+		rows.append(dict({"kind": "subtotal", "label": _("Soma Líquida"), "class": group["key"]}, **totals))
+		if abs(totals["saldo_debit"]) >= 0.005 or abs(totals["saldo_credit"]) >= 0.005:
+			rows.append(dict(
+				{"kind": "subtotal_saldos", "label": _("Soma Saldos"), "class": group["key"]},
+				**{f: (totals[f] if f.startswith("saldo") or f.startswith("opening") else None) for f in SUM_FIELDS}
+			))
+
+	totals = summed(grand_tops)
+	if grand_tops:
+		rows.append(dict({"kind": "total", "label": _("Soma Líquida Geral"), "class": None}, **totals))
+		rows.append(dict(
+			{"kind": "total_saldos", "label": _("Soma Saldos Geral"), "class": None},
+			**{f: (totals[f] if f.startswith("saldo") or f.startswith("opening") else None) for f in SUM_FIELDS}
+		))
+
+	return dict(base, rows=rows, totals=totals, depth=deepest[0] + 1)
+
+
+def _balancete_voucher_types(company):
+	"""Document types that actually posted to this company's ledger."""
+	return [
+		r[0]
+		for r in frappe.db.sql(
+			"""select distinct voucher_type from `tabGL Entry`
+			   where company = %s and ifnull(is_cancelled, 0) = 0 order by voucher_type""",
+			company,
+		)
+		if r[0]
+	]
+
+
+@frappe.whitelist()
+def get_balancete_entries(account, from_date=None, to_date=None, company=None, voucher_type=None):
+	"""Ledger lines behind one Balancete row, for the drill-down."""
+	_assert_access()
+	if not account:
+		return {"rows": [], "truncated": 0}
+
+	company = company or frappe.db.get_value("Account", account, "company")
+	start, end = _balancete_dates(from_date, to_date)
+
+	conds = ["gl.company = %(company)s", "ifnull(gl.is_cancelled, 0) = 0",
+	         "gl.posting_date between %(start)s and %(end)s"]
+	args = {"company": company, "start": start, "end": end, "limit": BALANCETE_MAX_ENTRIES + 1}
+	if (voucher_type or "").strip():
+		conds.append("gl.voucher_type = %(voucher_type)s")
+		args["voucher_type"] = voucher_type.strip()
+
+	# A group account drills into everything under it.
+	lft, rgt, is_group = frappe.db.get_value("Account", account, ["lft", "rgt", "is_group"])
+	if cint(is_group):
+		conds.append("""gl.account in (select name from tabAccount
+		                where company = %(company)s and lft >= %(lft)s and rgt <= %(rgt)s)""")
+		args.update({"lft": lft, "rgt": rgt})
+	else:
+		conds.append("gl.account = %(account)s")
+		args["account"] = account
+
+	rows = frappe.db.sql(
+		"""select gl.posting_date, gl.account, gl.voucher_type, gl.voucher_no, gl.party,
+		          gl.remarks, gl.debit, gl.credit
+		   from `tabGL Entry` gl where {conds}
+		   order by gl.posting_date, gl.creation limit %(limit)s""".format(conds=" and ".join(conds)),
+		args,
+		as_dict=True,
+	)
+
+	truncated = len(rows) > BALANCETE_MAX_ENTRIES
+	return {"rows": rows[:BALANCETE_MAX_ENTRIES], "truncated": 1 if truncated else 0}
